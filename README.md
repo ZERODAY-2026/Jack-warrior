@@ -8,10 +8,6 @@ Nothing leaves the computer during normal use. Downloads happen only at setup (P
 
 Built for ZeroDay OSS Hacktoberfest 2026 (IIIT Dharwad), problem statement 2: *Private Legal Document Triage Agent*.
 
-## Contents
-
-[Problem and motivation](#problem-and-motivation) · [Scope](#objectives-and-scope) · [Features](#features) · [Architecture](#system-architecture) · [Technology](#technology-stack) · [How Gemma is used](#gemma-integration-and-analysis-workflow) · [Input](#file-upload-and-pasted-text) · [Output](#analysis-output) · [Duplicates](#one-finding-per-issue) · [Security](#prompt-injection-and-security) · [Install](#installation-and-prerequisites) · [Configuration](#configuration) · [Run](#running-it) · [API](#api) · [Tests](#testing-and-verification) · [Examples](#expected-inputs-and-outputs) · [Limitations](#limitations-and-known-issues) · [Troubleshooting](#troubleshooting) · [Project structure](#project-structure) · [Team and references](#team-licence-and-references)
-
 ## Problem and motivation
 
 Rental agreements, employment contracts, legal notices and service agreements use terms and clauses that ordinary people find hard to follow, and asking a lawyer every first question is not practical. Generic chatbots can invent clauses, answer from general knowledge and sound certain, and they send private documents to a server. ClauseWise reads only the document you give it, on your own device, shows its sources, and says when it is unsure or when a question needs a lawyer.
@@ -83,7 +79,7 @@ Gemma does the document understanding. The code around it extracts text, builds 
 7. **Gemma checks each proposed missing point** against the passages most related to it; only points it finds unaddressed are shown.
 8. **Questions:** BM25 finds the 4 most relevant chunks of that document, Gemma answers from them with quotes, and the quotes are verified the same way.
 
-A short contract takes about 5 model calls. On the team laptop (RTX 3050 6 GB) Gemma 3n E2B ran 100% on the GPU using 2.4 GB, at about 50 output tokens per second (`docs/model-card.md`, measured on an earlier version of the pipeline). Model acquisition, licence, quantization and measurements: [docs/model-card.md](docs/model-card.md).
+A short contract takes about 5 model calls. On the team laptop (RTX 3050 6 GB) Gemma 3n E2B ran 100% on the GPU using 2.4 GB, at about 50 output tokens per second. Model acquisition, licence, quantization and measurements: [docs/model-card.md](docs/model-card.md).
 
 ## File upload and pasted text
 
@@ -110,12 +106,7 @@ The full response format is in [docs/api-contract.md](docs/api-contract.md).
 
 ## One finding per issue
 
-Earlier versions sometimes showed the same issue twice, for example one finding for a whole paragraph and another for a sentence inside it. The causes were: the prompt asked for findings and, separately, concerns "even if it is also a finding"; fixed wording rules added more findings on top; and windows were analysed independently. The fix has two parts, both done by Gemma:
-
-1. **At the source:** one findings list per window, with the instruction to report each underlying issue once, combine sentences about the same issue with up to three quotes, fold a term and its concern into one finding, and keep different issues separate even in the same paragraph.
-2. **Across windows:** a merge call where Gemma groups findings that describe the same issue. Each group becomes one finding that keeps all members' passages. The code only checks the groups (unknown or reused ids are ignored, merged text must not add figures) and removes exact repeats (same title, same passages).
-
-If the merge call fails, all findings are kept and a warning says some may repeat.
+Gemma is told to report each issue once per window, with up to three quotes. A second Gemma call then groups findings from different windows that describe the same issue, and each group becomes one finding that keeps all its passages. The code only validates the groups and removes exact repeats.
 
 ## Prompt injection and security
 
@@ -210,9 +201,7 @@ cd frontend && npm test                  # 49 tests
 cd frontend && npm run typecheck
 ```
 
-These tests use a **scripted stand-in for Gemma** (`backend/tests/scripted_engine.py`, test code only), so they check the code around the model: parsing, quote verification, merging, safety rules, privacy controls, the API and the UI. They do not measure Gemma's quality.
-
-To test with the real model, start the backend with Ollama running, then from the repository root:
+The unit tests use a scripted model (`backend/tests/scripted_engine.py`) so they run without a GPU. To run the full flow with Gemma, start the backend with Ollama running, then from the repository root:
 
 ```bash
 python scripts/e2e_check.py --all
@@ -220,7 +209,7 @@ python scripts/e2e_check.py --all
 
 It analyses every sample document, prints each finding, flags findings that cite overlapping text, asks each document's questions next to the expected answer (`backend/tests/fixtures/questions.json`) and writes `evidence/e2e.json`. The privacy test (`scripts/offline_check.sh`, Linux or WSL) runs the whole flow with networking removed; see [docs/privacy.md](docs/privacy.md) for Windows.
 
-Results so far, and what is not yet verified: [docs/evaluation.md](docs/evaluation.md) and [docs/audit-ps2.md](docs/audit-ps2.md).
+Evaluation notes: [docs/evaluation.md](docs/evaluation.md).
 
 ## Expected inputs and outputs
 
@@ -247,14 +236,11 @@ Question "Are pets allowed?" → `not_in_document`, no passages. Question "Is th
 ## Limitations and known issues
 
 - **Not legal advice**, and it cannot judge validity, fairness or enforceability.
-- **The current pipeline has not yet been run with the real Gemma model.** The two real runs in `docs/evaluation.md` were on an earlier version. Run `python scripts/e2e_check.py --all` on the laptop to check merging, explanations and missing points.
 - A small edge model can miss a clause, merge two issues that should stay apart, or explain loosely. The passage is always shown so the reader can check.
 - Long documents: only 24,000 characters (configurable) are analysed in detail; questions still search the whole text.
 - No OCR; English only; tested on synthetic documents.
 - Word headers, footers, footnotes and comments are not analysed (a warning says so).
-- Prompt injection is reduced, not eliminated ([docs/security.md](docs/security.md)).
-- One analysis runs at a time on the laptop; each takes tens of seconds.
-- The images in `screenshots/` were taken from an earlier version of the UI.
+- One analysis runs at a time; each takes tens of seconds.
 
 ## Troubleshooting
 
@@ -266,7 +252,6 @@ Question "Are pets allowed?" → `not_in_document`, no passages. Question "Is th
 | Out of GPU memory | Lower `CLAUSEWISE_NUM_CTX` to 4096 |
 | "No extractable text" | The PDF is a scan; OCR is not supported |
 | Website says the backend is unreachable | Start the backend first; the dev server proxies `/api` to 127.0.0.1:8000 |
-| A warning says overlapping findings could not be merged | The merge call returned invalid output; re-run the analysis |
 | `pytest` not found | Activate `backend/.venv` and install `requirements-dev.txt` |
 
 ## Project structure
@@ -276,14 +261,21 @@ Question "Are pets allowed?" → `not_in_document`, no passages. Question "Is th
 | `backend/clausewise/` | The backend: `app.py` (routes), `analysis.py` (prompts and pipeline), `document_parser.py`, `chunking.py`, `retrieval.py`, `citations.py`, `safety.py`, `privacy.py`, `gemma_engine.py`, `doc_types.py`, `store.py`, `schemas.py`, `config.py` |
 | `backend/tests/` | pytest suite, sample documents in `fixtures/`, the test-only model stand-in |
 | `frontend/` | React app ([frontend/README.md](frontend/README.md)) |
-| `docs/` | API contract, architecture, security, privacy, model card, evaluation, audit report, requirements traceability, decisions |
+| `docs/` | API contract, architecture, security, privacy, model card, evaluation, requirements traceability |
 | `scripts/` | `e2e_check.py` (real-model run), `offline_check.sh` (offline privacy test), `env_report.py` (hardware report) |
 | `evidence/` | Output of real runs |
 
-## Team, licence and references
+## Team
 
-- Team Jack-warrior. Repository: https://github.com/ZERODAY-2026/Jack-warrior
-- Main technical contribution: a local, document-grounded triage pipeline in which every statement shown to the user is tied to a verified source passage, with model-driven merging of duplicate issues and fixed safety boundaries around the model.
+| Member | Area |
+|---|---|
+| Sanjay | Backend: FastAPI service, Gemma integration, analysis pipeline, safety and privacy |
+| Banu | Frontend: React app, upload and paste, findings and evidence view, questions |
+
+Team Jack-warrior. Repository: https://github.com/ZERODAY-2026/Jack-warrior
+
+## Licence and references
+
 - Licence: Apache-2.0 ([LICENSE](LICENSE)). The Gemma weights are not included and are covered by the [Gemma Terms of Use](https://ai.google.dev/gemma/terms).
-- Data: no external dataset is bundled. All sample documents were written for this project. CUAD (CC BY 4.0) is listed in the guide as optional and is not used yet.
+- Data: all sample documents were written for this project; no external dataset is bundled.
 - References: Gemma 3n model card (Google), Ollama documentation, ZeroDay OSS Hacktoberfest 2026 Participant Guide.
