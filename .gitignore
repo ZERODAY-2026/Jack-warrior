@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Model weights and runtime caches (never commit)
+*.gguf
+*.safetensors
+*.bin
+*.task
+*.litertlm
+models/
+.ollama/
+
+# Local documents, evidence and logs may contain private content
+uploads/
+private/
+evidence/
+*.log
+*.strace
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

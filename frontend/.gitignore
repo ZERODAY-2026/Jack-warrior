@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.local
+.env
+.env.*
+!.env.example
+# never commit test documents people supply
+private-docs/
+*.tsbuildinfo
