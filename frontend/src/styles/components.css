@@ -760,39 +760,6 @@ code {
   text-transform: uppercase;
   color: var(--color-brand);
 }
-.priority {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.71875rem;
-  font-weight: 600;
-  color: var(--color-muted);
-}
-.priority__dots {
-  display: inline-flex;
-  gap: 2px;
-}
-.priority__dots i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-border-strong);
-}
-.priority--high .priority__dots i {
-  background: var(--color-danger);
-}
-.priority--medium .priority__dots i:nth-child(-n + 2) {
-  background: #c7922f;
-}
-.priority--low .priority__dots i:first-child {
-  background: var(--color-brand);
-}
-.priority--high {
-  color: var(--color-danger);
-}
-.priority--medium {
-  color: var(--color-warning);
-}
 
 /* ---------- Finding card ---------- */
 .findings {
@@ -1629,15 +1596,6 @@ code {
   border: 1px solid var(--color-border);
   font-size: 0.9375rem;
 }
-.risk-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-3);
-}
-.risk-line .priority {
-  font-size: 0.8125rem;
-}
 @media (max-width: 760px) {
   .upload-card__type {
     grid-template-columns: minmax(0, 1fr);
@@ -1645,4 +1603,27 @@ code {
   .type-card {
     flex-wrap: wrap;
   }
+}
+
+/* ---------- Risk reason and topics a document does not address (contract v0.5) ---------- */
+.finding-card__count {
+  font-size: 0.71875rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+.finding-card__action {
+  font-size: 0.8125rem;
+  color: var(--color-text);
+}
+.finding-card__action strong {
+  font-weight: 600;
+  color: var(--color-brand);
+}
+.evidence-status--absent {
+  color: var(--color-neutral);
+}
+.no-passage--absent {
+  border-color: var(--color-neutral-line);
+  background: var(--color-neutral-soft);
+  color: var(--color-neutral);
 }

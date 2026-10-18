@@ -15,11 +15,12 @@ interface Props {
  * When the backend is unsure, the picker opens by itself and names the alternatives.
  */
 export function DocumentTypeCard({ info, types, busy, onReanalyse }: Props) {
-  const unsure = info.confidence === 'low' && info.source === 'detected';
+  const fallback = info.method === 'fallback';
+  const unsure = (info.confidence === 'low' || fallback) && info.source === 'detected';
   const [open, setOpen] = useState(unsure);
   const [choice, setChoice] = useState(info.source === 'user' ? info.id : 'auto');
   useEffect(() => {
-    setOpen(info.confidence === 'low' && info.source === 'detected');
+    setOpen((info.confidence === 'low' || info.method === 'fallback') && info.source === 'detected');
     setChoice(info.source === 'user' ? info.id : 'auto');
   }, [info]);
 
@@ -39,7 +40,9 @@ export function DocumentTypeCard({ info, types, busy, onReanalyse }: Props) {
         <p className="type-card__meta">
           {info.source === 'user'
             ? `Chosen by you. Detected type: ${detectedLabel}.`
-            : unsure
+            : fallback
+              ? 'The type could not be detected, so it was analysed as a general legal document. Pick the right type if you know it.'
+              : unsure
               ? `Detected automatically, but the wording fits more than one type${alternatives.length ? ` (it could also be ${alternatives.map(labelOf).join(' or ')})` : ''}. Please confirm or pick the right type.`
               : 'Detected automatically. The findings and the "not identified" list are tailored to this type.'}
         </p>

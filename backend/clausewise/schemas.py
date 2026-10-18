@@ -11,7 +11,6 @@ Category = Literal[
 ]
 Classification = Literal["explicit", "interpretation", "concern", "not_established"]
 EvidenceStatus = Literal["verified", "unverified", "none"]
-Priority = Literal["high", "medium", "low"]
 AnswerType = Literal["answered", "not_in_document", "ambiguous", "needs_professional", "out_of_scope"]
 
 
@@ -30,8 +29,6 @@ class Finding(BaseModel):
     title: str
     explanation: str
     classification: Classification
-    priority: Priority
-    priority_reason: str
     evidence_status: EvidenceStatus
     source_passages: list[Passage]
     limitations: list[str] = Field(default_factory=list)
@@ -69,9 +66,10 @@ class DocumentTypeInfo(BaseModel):
     id: str
     label: str
     source: Literal["detected", "user"]
-    detected_id: str
+    detected_id: str | None  # None when the user chose the type and no detection was run
     confidence: Literal["high", "low"]
     alternatives: list[str]
+    method: Literal["model", "fallback"] = "model"
 
 
 class DocumentTypeOption(BaseModel):

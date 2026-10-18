@@ -44,7 +44,6 @@ export type FindingCategory =
   | 'other';
 
 export type Classification = 'explicit' | 'interpretation' | 'concern' | 'not_established';
-export type Priority = 'high' | 'medium' | 'low';
 export type EvidenceStatus = 'verified' | 'unverified' | 'none';
 
 export interface Passage {
@@ -62,8 +61,6 @@ export interface Finding {
   title: string;
   explanation: string;
   classification: Classification;
-  priority: Priority;
-  priority_reason: string;
   evidence_status: EvidenceStatus;
   source_passages: Passage[];
   limitations: string[];
@@ -102,6 +99,8 @@ export interface DocumentTypeInfo {
   detected_id: string;
   confidence: 'high' | 'low';
   alternatives: string[];
+  /** How the type was decided (v0.5+): "model", "user" or "fallback". Null from older backends. */
+  method: string | null;
 }
 
 export interface AnalysisResult {

@@ -1,5 +1,5 @@
 import type { AnalysisResult, Classification } from '../../types/api';
-import { CLASSIFICATION_HELP } from '../../utils/labels';
+import { CLASSIFICATION_HELP, isNotAddressed } from '../../utils/labels';
 import { ClassificationBadge } from '../common/Badges';
 import { Callout } from '../common/Callout';
 import { FindingCard } from './FindingCard';
@@ -21,7 +21,8 @@ export function OverviewPanel({ analysis, selectedId, onSelect, onShowAll, selec
   const { summary, findings, glossary, not_found, warnings, processing, document: doc } = analysis;
   const partialCoverage =
     processing.chunks_total !== null && processing.chunks_analysed !== null && processing.chunks_analysed < processing.chunks_total;
-  const top = findings.filter((f) => f.priority === 'high').slice(0, 3);
+  // No ranking: the first few findings in document order, leaving out topics the document does not address.
+  const top = findings.filter((f) => !isNotAddressed(f.title)).slice(0, 3);
   const counts = ORDER.map((c) => ({ c, n: findings.filter((f) => f.classification === c).length })).filter((x) => x.n > 0);
 
   return (
@@ -86,7 +87,7 @@ export function OverviewPanel({ analysis, selectedId, onSelect, onShowAll, selec
       {top.length > 0 && (
         <section aria-labelledby="top-title">
           <div className="section-head">
-            <h2 id="top-title" className="card-title">Highest risk first</h2>
+            <h2 id="top-title" className="card-title">First findings in the document</h2>
             <button type="button" className="button button--ghost button--small" onClick={onShowAll}>
               All {findings.length} findings
             </button>

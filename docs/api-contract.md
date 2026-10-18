@@ -1,6 +1,6 @@
 # API contract (frontend ⇄ local backend)
 
-**Status: v0.4, backend (2026-10-18).** v0.4 adds document types (detected, or chosen by the user), `impact` on findings, and a re-analyse route (marked *added in v0.4*). v0.2 only added fields to v0.1 (marked *added in v0.2*). v0.3 adds Word `.docx` uploads and pasted text (marked *added in v0.3*); nothing was renamed or removed. The backend's Pydantic models in `backend/clausewise/schemas.py` are the executable version and are tested; `GET /api/openapi.json` serves the generated schema.
+**Status: v0.6, backend (2026-10-18).** v0.6 removes `priority` and `priority_reason` from findings (no risk levels), lets a finding carry 1-3 passages after duplicates are merged, makes Gemma detect the document type (`method` is now `model` or `fallback`, and `detected_id` is `null` when the user chose the type), makes `not_found` come from a model check, and adds the warnings `consolidation_skipped`, `missing_check_skipped` and `type_not_detected` (marked *v0.6*). v0.5 added `document_type.method`, computed risk levels and "Not addressed" findings, and four types (family, loan, property, power of attorney), marked *added in v0.5*; nothing was renamed or removed. v0.4 adds document types (detected, or chosen by the user), `impact` on findings, and a re-analyse route (marked *added in v0.4*). v0.2 only added fields to v0.1 (marked *added in v0.2*). v0.3 adds Word `.docx` uploads and pasted text (marked *added in v0.3*); nothing was renamed or removed. The backend's Pydantic models in `backend/clausewise/schemas.py` are the executable version and are tested; `GET /api/openapi.json` serves the generated schema.
 The backend owns this contract. Any field or path change should be made here first and announced to the other teammate. The frontend's TypeScript mirror lives in `frontend/src/types/api.ts`.
 
 ## Transport
@@ -84,10 +84,12 @@ Response (*added in v0.4*): `document_type` object:
 
 ```json
 "document_type": {"id": "employment", "label": "Employment contract or offer letter", "source": "detected",
-                  "detected_id": "employment", "confidence": "high", "alternatives": []}
+                  "detected_id": "employment", "confidence": "high", "alternatives": [], "method": "model"}
 ```
 
-`source` is `detected` or `user`. `confidence` is `high` or `low`; when `low`, the UI should invite the user to confirm or pick the type. `alternatives` are other plausible type ids. The type changes what the model is asked to look for and which topics are reported in `not_found`; it never adds content that is not in the document.
+*v0.6:* the local model reads the start of the document and picks the type from the list (one short call). `method` is `model`, or `fallback` when its answer was unusable (the type is then `general`, `confidence: "low"`, with a `type_not_detected` warning). When the user chose the type, no detection call is made: `source: "user"` and `detected_id: null`.
+
+`source` is `detected` or `user`. `confidence` is `high` or `low`, as the model reported it; when `low`, the UI should invite the user to confirm or pick the type. `alternatives` are other plausible type ids. The type is passed to the model as context; there are no per-type rules or topic lists.
 
 - `document.file_type` is `"pdf"`, `"docx"` (*added in v0.3*) or `"txt"`. For `docx`, `page_count` is `null` and passages have `page: null` (Word files have no fixed pages).
 - DOCX: the main text is read in order, with paragraphs and table rows (cells joined by ` | `); deleted tracked changes are skipped. If headers, footers, footnotes or comments contain text, a `docx_body_only` warning says they were not analysed.
@@ -128,8 +130,8 @@ Response `200`:
 ```
 
 - `extraction.status`: `complete` | `partial`. `unreadable_pages` lists 1-based pages with no text.
-- `not_found`: topics the backend looked for and did not find. Wording must stay "not found in the reviewed text", never "the contract lacks". *Changed in v0.4:* the topics depend on `document_type` (a legal notice is not checked for a governing-law clause; an NDA is checked for exclusions), and the note says the point may be worded differently or deliberately left out.
-- `warnings`: non-fatal issues. A response with warnings is a partial success. Codes the backend emits: `pages_truncated`, `text_truncated`, `unreadable_pages`, `long_document_partially_analysed`, `partial_analysis`, `instruction_like_text` (prompt-injection-like text found; treated as content and also reported as a `concern` finding).
+- `not_found` (*changed in v0.6*): important points this document gives reason to expect but does not seem to address. The model proposes them from the document's own content, then checks each against the passages most related to it; only points it finds unaddressed are listed. Each also appears as a "Not addressed" finding. Wording stays "does not appear to address", never "the contract lacks".
+- `warnings`: non-fatal issues. A response with warnings is a partial success. Codes the backend emits: `pages_truncated`, `text_truncated`, `unreadable_pages`, `long_document_partially_analysed`, `partial_analysis`, `instruction_like_text` (prompt-injection-like text found; treated as content and also reported as a `concern` finding), and in v0.6 `type_not_detected`, `consolidation_skipped` (duplicate merging failed, so some points may repeat) and `missing_check_skipped`.
 - `glossary` (*added in v0.2*): legal terms that appear in the document, with a plain-language explanation. A term is kept only if it occurs in the document text, and its passage is copied from the source.
 - `processing` (*added in v0.2*: `runtime`, `model_calls`, `chunks_total`, `chunks_analysed`, `quotes_rejected`). `quotes_rejected` counts model-proposed quotes that were not found in the document and were therefore discarded.
 
@@ -142,11 +144,10 @@ Response `200`:
   "title": "Termination with 30 days' notice",
   "explanation": "Either side can end the agreement by giving 30 days' written notice.",
   "classification": "explicit",
-  "priority": "high",
-  "priority_reason": "Affects how and when you can leave the agreement.",
   "evidence_status": "verified",
-  "source_passages": [ /* Passage */ ],
+  "source_passages": [ /* 1-3 Passage */ ],
   "limitations": [],
+  "impact": "You can leave with a month's notice, but so can the landlord.",
   "next_step": null
 }
 ```
@@ -157,14 +158,17 @@ Response `200`:
   - `interpretation`: a cautious plain-language reading of cited wording.
   - `concern`: a possible issue or ambiguity grounded in a passage, to review, not a legal conclusion.
   - `not_established`: the evidence does not establish it.
-- `priority`: `high` | `medium` | `low`, always with a `priority_reason`. Not a legal risk rating.
+- *v0.6:* there is no `priority`, `priority_reason` or other risk level. Findings are in document order, with "Not addressed" findings last.
+- One finding per underlying issue (*v0.6*): the model is asked to report each issue once, then a second model call groups findings that describe the same issue and each group is merged. A merged finding keeps every member's passages (up to the distinct ones; where one passage contains another, the narrower one is kept).
 - `evidence_status`:
   - `verified`: every passage was matched against the original extracted text.
   - `unverified`: a passage could not be matched; the UI shows it as unverified. **The v0.2 backend never sends this**: an unmatched quote is discarded and the finding gets `none`, so model-written text is never displayed as a quotation. The value stays in the enum for compatibility.
-  - `none`: no supporting passage. The UI shows "No supporting passage found" and never fills it in. The backend also sets `classification: "not_established"`, `priority: "low"` and explains why in `limitations`.
-- `next_step`: optional safe suggestion, e.g. "Ask the landlord to clarify" or "Consult a qualified lawyer".
+  - `none`: no supporting passage. The UI shows "No supporting passage found" and never fills it in. The backend also sets `classification: "not_established"` and explains why in `limitations`.
+- `next_step` ("Suggested action"): a specific step tied to this wording, from the model, or `null` when no action is needed. Never filled in by the backend.
+- `limitations` also carries the model's note on missing context for this point (for example a schedule the clause refers to but that is not included).
 - `impact` (*added in v0.4*): optional one sentence on how the clause could affect the reader in practice. `null` when the model gave none, when the quote was not verified, or when it mentioned figures that are not in the passage.
-- `priority` is the risk level; `priority_reason` points at the wording behind it. The model is told to use `low` and say what is unclear when the excerpt does not give enough to judge.
+- "Not addressed" findings (*v0.5, source changed in v0.6*): `category: "concern"`, title `Not addressed: <topic>`, `classification: "not_established"`, `evidence_status: "none"`, empty `source_passages`, the model's reason in `explanation` and its suggested action in `next_step`. The UI shows them as "not found in the document".
+- A finding from the fixed security check (text addressed to an AI system) has `limitations[0]` starting "Found by a fixed security check".
 
 ### Passage
 
@@ -242,7 +246,7 @@ Response `200`:
   - `out_of_scope`: unrelated to the document or refused.
 - `escalation`: user-safe sentence recommending a qualified professional, or `null`.
 - `jurisdiction_note`: set when the answer depends on governing law.
-- Backend rules: questions about validity, enforceability or legality, and "should I…" questions, always come back as `needs_professional` with `escalation`, plus any passages the document has on the topic. If the model claims `answered` but none of its quotes can be found in the document, the answer is withheld and the response becomes `not_in_document`. If retrieval finds no chunk that shares a meaningful word with the question, the backend answers `not_in_document` without calling the model.
+- Backend rules: questions about validity, enforceability or legality, and "should I…" questions, always come back as `needs_professional` with `escalation`, plus any passages the document has on the topic. If the model claims `answered` but none of its quotes can be found in the document, the answer is withheld and the response becomes `not_in_document`. If retrieval finds no chunk that shares a meaningful word with the question, the backend answers `not_in_document` without calling the model. *v0.6:* the model can also return `needs_professional` itself when answering would need a legal judgement or a decision; the backend then adds the same escalation.
 
 ## `DELETE /api/documents/{document_id}`
 
@@ -261,6 +265,6 @@ Timing and token counts only, never content: `{"model": {"calls", "failures", "a
 ## Resolved questions (v0.2)
 
 1. **Synchronous `POST /api/documents`** for v1. Analysis makes `ceil(analysed_chars / 4000) + 1` model calls (default budget: 24,000 characters, so at most 7 calls). On CPU or a 6 GB laptop GPU this can take minutes, so the frontend must not set a short fetch timeout and the Vite proxy timeout should be at least 15 minutes (`proxyTimeout`/`timeout: 900000`). If measured times on the target laptop are too long we will add `202` + `GET /api/documents/{id}/status`; that would be a v0.3 change announced here first.
-2. **Limits:** 10 MB file, first 80 pages read, 400,000 characters read. Longer documents are read up to the limit with a `pages_truncated`/`text_truncated` warning. Only 24,000 characters are analysed in detail (chunks ranked by legal keywords); questions search the whole extracted text.
+2. **Limits:** 10 MB file, first 80 pages read, 400,000 characters read. Longer documents are read up to the limit with a `pages_truncated`/`text_truncated` warning. Only 24,000 characters are analysed in detail (chunks with the densest legal wording first); questions search the whole extracted text.
 3. **Section:** best-effort heading detection, see Passage.
 4. **One request at a time:** the backend serialises model calls; a second request waits for the first.

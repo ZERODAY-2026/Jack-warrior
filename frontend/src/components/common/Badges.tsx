@@ -1,11 +1,10 @@
 import { AlertTriangle, BadgeCheck, CircleHelp, FileQuestion, HelpCircle, Quote, ShieldAlert } from 'lucide-react';
-import type { AnswerType, Classification, EvidenceStatus, Priority } from '../../types/api';
+import type { AnswerType, Classification, EvidenceStatus } from '../../types/api';
 import {
   ANSWER_LABEL,
   CLASSIFICATION_HELP,
   CLASSIFICATION_LABEL,
   EVIDENCE_LABEL,
-  PRIORITY_LABEL,
 } from '../../utils/labels';
 
 // Every badge carries an icon and a text label, so meaning never depends on colour alone.
@@ -33,19 +32,6 @@ export function EvidenceBadge({ value }: { value: EvidenceStatus }) {
     <span className={`evidence-status evidence-status--${value}`}>
       <Icon aria-hidden="true" size={14} />
       {EVIDENCE_LABEL[value]}
-    </span>
-  );
-}
-
-export function PriorityTag({ value }: { value: Priority }) {
-  return (
-    <span className={`priority priority--${value}`}>
-      <span className="priority__dots" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </span>
-      {PRIORITY_LABEL[value]}
     </span>
   );
 }

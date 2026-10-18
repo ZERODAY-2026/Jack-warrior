@@ -1,4 +1,4 @@
-import type { AnswerType, Classification, EvidenceStatus, FindingCategory, Priority } from '../types/api';
+import type { AnswerType, Classification, EvidenceStatus, FindingCategory } from '../types/api';
 
 export const CATEGORY_LABEL: Record<FindingCategory, string> = {
   obligation: 'Obligation',
@@ -27,13 +27,6 @@ export const CLASSIFICATION_HELP: Record<Classification, string> = {
   not_established: 'The available text does not establish this.',
 };
 
-// The backend's priority is its risk level for the clause (contract v0.4), always with a reason.
-export const PRIORITY_LABEL: Record<Priority, string> = {
-  high: 'High risk',
-  medium: 'Medium risk',
-  low: 'Low risk',
-};
-
 export const EVIDENCE_LABEL: Record<EvidenceStatus, string> = {
   verified: 'Quote matched in document',
   unverified: 'Quote not verified',
@@ -47,6 +40,11 @@ export const ANSWER_LABEL: Record<AnswerType, string> = {
   needs_professional: 'Needs a qualified professional',
   out_of_scope: 'Outside what this tool can answer',
 };
+
+/** Findings the backend adds for topics a document of this type usually covers but this one does not (v0.5). */
+export function isNotAddressed(title: string): boolean {
+  return title.startsWith('Not addressed:');
+}
 
 export function passageLocation(p: { page: number | null; section: string | null }): string {
   const parts: string[] = [];

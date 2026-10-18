@@ -1,6 +1,6 @@
 # ClauseWise backend
 
-Local FastAPI service that reads PDF, Word (.docx) and TXT legal documents, or pasted text,, analyses them with Gemma running on this machine, and returns findings with passages copied from the document. Not legal advice.
+Local FastAPI service that reads PDF, Word (.docx) and TXT legal documents, or pasted text, analyses them with Gemma running on this machine, and returns findings with passages copied from the document. Not legal advice.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ The model state in `/api/health` goes `loading` → `ready` after a warm-up call
 
 ```bash
 python -m pytest -q
-python ../scripts/e2e_check.py tests/fixtures/rental_agreement.txt   # against a running backend + real model
+python ../scripts/e2e_check.py --all                                  # against a running backend + real model
 ../scripts/offline_check.sh                                           # Linux/WSL: full run with networking removed
 ```
 
@@ -48,7 +48,9 @@ Environment variables (all optional):
 | `CLAUSEWISE_MODEL` | `gemma3n:e2b` | Model tag/name in the runtime |
 | `CLAUSEWISE_NUM_CTX` | `8192` | Context window requested from Ollama |
 | `CLAUSEWISE_TEMPERATURE` | `0.1` | |
-| `CLAUSEWISE_MAX_OUTPUT_TOKENS` | `1536` | Per call (findings plus concerns need room) |
+| `CLAUSEWISE_MAX_OUTPUT_TOKENS` | `1536` | Output limit per model call |
+| `CLAUSEWISE_MAX_FINDINGS_PER_WINDOW` | `6` | Findings the model may return per window |
+| `CLAUSEWISE_MAX_QUESTION_CHARS` | `500` | Longest accepted question |
 | `CLAUSEWISE_REQUEST_TIMEOUT_S` | `600` | Per model call |
 | `CLAUSEWISE_WARMUP` | `1` | Load the model at startup with a content-free prompt |
 | `CLAUSEWISE_MAX_FILE_BYTES` | `10485760` | Upload limit |
@@ -68,7 +70,8 @@ clausewise/
   chunking.py         source-preserving chunks
   retrieval.py        BM25 + legal synonyms
   gemma_engine.py     Ollama / llama.cpp clients (loopback only)
-  analysis.py         prompts, findings, summary, Q&A
+  analysis.py         prompts, findings, merging, missing points, summary, Q&A
+  doc_types.py        list of document type labels (the model picks one)
   citations.py        quote location and support checks
   safety.py           triage, output screening, injection detection
   privacy.py          egress guard, logging policy

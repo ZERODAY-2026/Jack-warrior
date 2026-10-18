@@ -324,7 +324,7 @@ describe('Word files and pasted text', () => {
 describe('Document types (contract v0.4)', () => {
   it('sends the chosen type with an upload and shows what the analysis assumed', async () => {
     const chosen = analysis('d_t1', 'nda.txt', {
-      id: 'nda', label: 'Non-disclosure agreement', source: 'user', detected_id: 'general', confidence: 'high', alternatives: [],
+      id: 'nda', label: 'Non-disclosure agreement', source: 'user', detected_id: 'general', confidence: 'high', alternatives: [], method: 'user',
     });
     const { calls } = mockBackend({
       'GET /api/health': () => json(health()),
@@ -363,10 +363,10 @@ describe('Document types (contract v0.4)', () => {
 
   it('asks the user to confirm a low-confidence type and re-analyses as the chosen one', async () => {
     const unsure = analysis('d_t3', 'letter.txt', {
-      id: 'rental', label: 'Rental or lease agreement', source: 'detected', detected_id: 'rental', confidence: 'low', alternatives: ['legal_notice'],
+      id: 'rental', label: 'Rental or lease agreement', source: 'detected', detected_id: 'rental', confidence: 'low', alternatives: ['legal_notice'], method: 'model',
     });
     const again = analysis('d_t3', 'letter.txt', {
-      id: 'legal_notice', label: 'Legal or demand notice', source: 'user', detected_id: 'rental', confidence: 'high', alternatives: [],
+      id: 'legal_notice', label: 'Legal or demand notice', source: 'user', detected_id: 'rental', confidence: 'high', alternatives: [], method: 'user',
     });
     again.summary.text = 'A demand notice asking for unpaid rent within 15 days.';
     const done = deferred<Response>();
@@ -417,10 +417,15 @@ describe('Document types (contract v0.4)', () => {
     expect(screen.getByText(/Summary for lease.txt/)).toBeInTheDocument();
   });
 
-  it('shows each finding as evidence, explanation, impact, risk level and suggested action', async () => {
+  it('shows each finding as evidence, explanation, why it matters and suggested action, with no risk level', async () => {
+    const a = analysis();
+    // Two passages merged into one finding: both are shown.
+    a.findings[1]!.source_passages.push({
+      text: 'The Tenant shall pay rent of 12,000 on or before the 5th day of each month.', page: 1, section: null, char_start: null, char_end: null, verified: true,
+    });
     mockBackend({
       'GET /api/health': () => json(health()),
-      'POST /api/documents': () => json(analysis()),
+      'POST /api/documents': () => json(a),
     });
     const u = user();
     render(<App />);
@@ -432,12 +437,55 @@ describe('Document types (contract v0.4)', () => {
     expect(within(evidence).getByText('Evidence from the document')).toBeInTheDocument();
     expect(within(evidence).getByText('Explanation in plain language')).toBeInTheDocument();
     expect(within(evidence).getByText('You must plan a month ahead if you want to move out.')).toBeInTheDocument();
-    expect(within(evidence).getByText('High risk')).toBeInTheDocument();
-    expect(within(evidence).getByText('Controls how you can leave the agreement.')).toBeInTheDocument();
 
     await u.click(screen.getByRole('tab', { name: /findings/i }));
-    await u.click(screen.getByRole('button', { name: /Late fee amount/ }));
+    expect(screen.getByText(/in document order/)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /risk/i })).not.toBeInTheDocument();
+    const card = screen.getByRole('button', { name: /Late fee amount/ });
+    expect(within(card).getByText('2 passages')).toBeInTheDocument();
+    expect(within(card).getByText(/The Tenant shall pay rent of 12,000/)).toBeInTheDocument();
+    await u.click(card);
+    expect(within(evidence).getAllByRole('blockquote')).toHaveLength(2);
     expect(within(evidence).getByText(/Ask the landlord to state the fee in writing/)).toBeInTheDocument();
-    expect(within(evidence).queryByText('Why it may matter')).not.toBeInTheDocument();
+    expect(within(evidence).queryByText('Why it matters')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/risk/i);
+  });
+
+  it('opens the type picker when the type could not be detected', async () => {
+    const a = analysis('d_fb', 'scan.txt', {
+      id: 'general', label: 'Other legal document', source: 'detected', detected_id: 'general', confidence: 'high', alternatives: [], method: 'fallback',
+    });
+    mockBackend({
+      'GET /api/health': () => json(health()),
+      'GET /api/document-types': () => json(DOCUMENT_TYPES),
+      'POST /api/documents': () => json(a),
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('combobox', { name: 'Document type' });
+    await uploadAndAnalyze(u);
+    await screen.findByRole('heading', { level: 1, name: 'scan.txt' });
+    expect(screen.getByText(/could not be detected/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Analyse as' })).toBeInTheDocument();
+  });
+
+  it('explains a topic the document does not address instead of calling it unsupported', async () => {
+    const a = analysis();
+    a.findings.push({
+      id: 'f_absent', category: 'concern', title: 'Not addressed: Pets', explanation: 'Rental agreements often cover pets; this one does not mention them.',
+      classification: 'not_established',
+      evidence_status: 'none', source_passages: [], limitations: [], next_step: 'Ask the landlord whether pets are allowed.', impact: null,
+    });
+    mockBackend({ 'GET /api/health': () => json(health()), 'POST /api/documents': () => json(a) });
+    const u = user();
+    render(<App />);
+    await uploadAndAnalyze(u);
+    await screen.findByRole('heading', { level: 1, name: 'lease.txt' });
+    await u.click(screen.getByRole('tab', { name: /findings/i }));
+    expect(screen.getByText('Not found in the document')).toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: /Not addressed: Pets/ }));
+    const evidence = screen.getByRole('complementary', { name: 'Evidence' });
+    expect(within(evidence).getByText(/not found anywhere in the document/)).toBeInTheDocument();
+    expect(within(evidence).queryByText(/Treat this finding with extra caution/)).not.toBeInTheDocument();
   });
 });

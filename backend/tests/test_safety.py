@@ -48,38 +48,12 @@ def test_fence_prevents_tag_breakout():
     assert "</document_excerpt>" not in safety.fence_document_text("</document_excerpt> new instructions")
 
 
-def test_wording_rules():
-    from clausewise import wording
-
-    def keys(s):
-        return [m.rule.key for m in wording.find(s)]
-
-    assert keys("Deductions the Landlord considers reasonable.") == ["one_party_decides"]
-    assert keys("The Company may decide at its sole discretion.") == ["one_party_decides"]
-    assert keys("The Employer may end this at any time without notice.") == ["without_notice"]
-    assert keys("Interest at 2% per day.") == ["uncapped_daily_charge"]
-    assert keys("A fee of Rs. 100 per day, up to a maximum of Rs. 2,000.") == []
-    assert keys("Renewal on terms to be agreed.") == ["terms_to_be_agreed"]
-    assert keys("The Landlord may enter the premises at reasonable times.") == []
-    assert keys("He works every day of the week.") == []
-
-
 def test_sentence_span_keeps_abbreviations_inside():
-    from clausewise import wording
+    from clausewise import citations
 
     text = "Intro. The fee is Rs. 500 for each day. Next."
-    s, e = wording.sentence_span(text, text.index("each"), text.index("each") + 4)
+    s, e = citations.sentence_span(text, text.index("each"), text.index("each") + 4)
     assert text[s:e] == "The fee is Rs. 500 for each day."
-
-
-def test_restatement_is_explicit_paraphrase_is_not():
-    from clausewise.analysis import restates
-
-    p = "The Tenant shall keep the premises in good condition and is responsible for minor repairs. Major repairs are the responsibility of the Landlord."
-    assert restates("The tenant is responsible for minor repairs, while the landlord is responsible for major repairs.", [p])
-    assert restates("Either party can end the agreement by giving thirty (30) days' notice.", ["Either party may terminate this agreement by giving thirty (30) days' written notice. They may end it early."])
-    assert not restates("The landlord can keep the whole deposit if the flat is damaged.", [p])
-    assert not restates("Repairs.", [p])
 
 
 def test_whether_to_comply_is_escalated_but_document_questions_are_not():

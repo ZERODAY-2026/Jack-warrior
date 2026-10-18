@@ -25,7 +25,8 @@ from pathlib import Path
 import httpx
 
 FIXTURES = Path(__file__).resolve().parent.parent / "backend" / "tests" / "fixtures"
-SAMPLES = ["rental_agreement.txt", "employment_contract.txt", "legal_notice.txt", "service_agreement.txt", "nda.txt"]
+SAMPLES = ["rental_agreement.txt", "employment_contract.txt", "legal_notice.txt", "service_agreement.txt", "nda.txt", "marital_settlement.txt",
+           "penalty_and_termination.txt", "injection_notice.txt"]
 CONTENT_TYPES = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 DEFAULT_QUESTIONS = [
@@ -89,8 +90,15 @@ def main() -> int:
         print(f"{path.name}: type {dt.get('id')} ({dt.get('confidence')}), {len(body['findings'])} findings ({concerns} concerns), "
               f"{body['processing']['model_calls']} model calls, {body['processing']['quotes_rejected']} quotes rejected, "
               f"{elapsed:.1f}s, passage mismatches: {len(mismatches)}")
+        for f in body["findings"]:
+            print(f"  - [{f['classification']}] {f['title']} ({len(f['source_passages'])} passage(s){', action' if f.get('next_step') else ''})")
+        # Two findings citing overlapping text may be the same issue reported twice; a person should look at these.
+        spans = [(f["id"], p["char_start"], p["char_end"]) for f in body["findings"] for p in f["source_passages"]]
+        overlaps = sorted({(a, b) for a, s1, e1 in spans for b, s2, e2 in spans if a < b and s1 < e2 and s2 < e1})
+        if overlaps:
+            print("  findings citing overlapping text (check for repeats):", ", ".join(f"{a}/{b}" for a, b in overlaps))
         if body.get("not_found"):
-            print("  not identified:", "; ".join(n["topic"] for n in body["not_found"]))
+            print("  not addressed:", "; ".join(n["topic"] for n in body["not_found"]))
         answers = []
         for item in questions:
             q = item["q"]
@@ -106,7 +114,7 @@ def main() -> int:
         deleted = client.delete(f"/api/documents/{doc_id}").json()
         report["documents"].append({
             "file": path.name, "analysis_seconds": round(elapsed, 2), "analysis": body, "answers": answers,
-            "passage_mismatches": mismatches, "deleted": deleted,
+            "passage_mismatches": mismatches, "overlapping_findings": overlaps, "deleted": deleted,
         })
     report["metrics"] = client.get("/api/metrics").json()
     args.out.parent.mkdir(parents=True, exist_ok=True)

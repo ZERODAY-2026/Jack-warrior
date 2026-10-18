@@ -172,3 +172,21 @@ def unsupported_numbers(claim: str, passages: list[str]) -> set[str]:
     for p in passages:
         source_nums |= _numbers(p)
     return claim_nums - source_nums
+
+
+# A full stop that ends a sentence: not after a common abbreviation ("Rs.", "No.")
+# and followed by whitespace, or the end of a line.
+_ABBREV = r"(?<!\bRs)(?<!\bNo)(?<!\bMr)(?<!\bMs)(?<!\bDr)(?<!\bSt)(?<!\bvs)(?<!\bie)(?<!\beg)(?<!\bCo)(?<!\bLtd)(?<!\bInc)(?<!\bcl)"
+_BOUNDARY = re.compile(r"\n|" + _ABBREV + r"\.(?=\s|$)")
+
+
+def sentence_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """The sentence (or line) around [start, end), as source offsets."""
+    s = 0
+    for b in _BOUNDARY.finditer(text, 0, start):
+        s = b.end()
+    nxt = _BOUNDARY.search(text, end)
+    e = len(text) if nxt is None else (nxt.end() if text[nxt.start()] == "." else nxt.start())
+    while s < start and text[s].isspace():
+        s += 1
+    return s, e

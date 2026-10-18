@@ -31,8 +31,8 @@ Optional env vars (`.env.local`, never committed): `VITE_ANALYZE_TIMEOUT_MS` (de
 2. Accepts one PDF, Word (.docx) or TXT file by drag-and-drop or file picker, checking type and size against the backend's limits, then uploads on an explicit "Analyse document" click. A "Paste text" tab sends pasted text (with an optional name) to `POST /api/documents/text` instead; it appears only when `/api/health` reports `accepts_pasted_text: true`. Old `.doc` files are rejected with a hint to save them as `.docx`.
 3. Shows elapsed time while the model runs (no invented progress percentage) and lets the user cancel.
 4. Document types (contract v0.4): a "Document type" picker (Auto-detect by default, list from `GET /api/document-types`) is sent with uploads and pasted text. After analysis a card says which type was used; when the backend's confidence is low it opens by itself, names the alternatives, and "Analyse again" calls `POST /api/documents/{id}/reanalyse`, keeping earlier results if that fails or is cancelled. Older backends without the list simply get no picker.
-5. Review workspace: Overview (summary, how to read labels, "highest risk first", "not identified in the reviewed text"), Findings (filter by topic, type, risk level), Ask a question.
-6. Evidence panel (one finding at a time): evidence from the document, explanation, why it may matter (`impact`), risk level with its reason, and suggested action. Jurisdiction notes are labelled as general information, not from the document. The document's own words in a serif quote block with page/section and verification status, kept visually apart from the AI interpretation. "No supporting passage found" is shown when there is none.
+5. Review workspace: Overview (summary, how to read labels, the first findings in document order, "not identified in the reviewed text"), Findings in document order (filter by topic and type; no risk levels, by design), Ask a question.
+6. Evidence panel (one finding at a time): evidence from the document, explanation, every merged passage (up to three), why it matters (`impact`), and the suggested action (`next_step`, shown only when present). Jurisdiction notes are labelled as general information, not from the document. The document's own words in a serif quote block with page/section and verification status, kept visually apart from the AI interpretation. "No supporting passage found" is shown when there is none.
 7. "View in document" opens the extracted page and highlights the passage only when the backend's offsets match the quote, or the quote is an exact unique match. Otherwise it says it could not locate it.
 8. "Remove document" calls `DELETE /api/documents/{id}` and only says the backend deleted its copy when the backend confirms.
 
@@ -75,7 +75,7 @@ Semantic landmarks, skip link, labelled controls, visible focus rings, keyboard 
 
 ## Test results
 
-Latest local run (2026-10-18, contract v0.4): 47/47 tests passing, `tsc -b` clean, production build 392 kB JS (125 kB gzip) plus 39 kB CSS, `npm audit` 0 vulnerabilities.
+Latest local run (2026-10-18, contract v0.6): 49/49 tests passing, `tsc -b` clean, production build 392 kB JS (125 kB gzip) plus 39 kB CSS, `npm audit` 0 vulnerabilities.
 Not yet done: an end-to-end run against the real Gemma model.
 
 ## End-to-end check against the backend

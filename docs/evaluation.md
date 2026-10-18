@@ -56,6 +56,13 @@ Fixes after the second run (not yet re-run with the real model): a heading is ne
 
 Still open: escalation answers to whole-document questions ("Is this agreement legally enforceable?") show no passages, because no clause is more relevant than another.
 
+**Version 0.6 (later on 2026-10-18), not yet run with the real model.** The second run showed the same issue reported twice: a finding and a separate concern on the same clause (maintenance, renewal), and a wording-check concern overlapping a model finding (late fee; termination paragraph and its last sentence). Causes: the prompt asked for findings and, separately, concerns "even if it is also a finding above"; the fixed wording rules added more on top; deduplication only compared the first passage. Changes:
+- One findings list per window, with the instruction to report each underlying issue once and give up to 3 quotes; the separate concerns list is gone.
+- A Gemma call merges findings from all windows that describe the same issue (`test_consolidation.py`).
+- The fixed wording rules (`wording.py`), the computed risk levels (`risk.py`), keyword type detection and per-type topic lists were removed. Gemma now detects the type and proposes and checks missing points.
+- Risk levels (`priority`) were removed from the output.
+Backend tests: 120 passed with the scripted stand-in for Gemma. These check the code around the model; how well Gemma merges, explains and finds missing points must be checked with `python scripts\e2e_check.py --all` on the laptop, which now prints each finding and flags findings that cite overlapping text.
+
 The tables below mark rows still *pending*.
 
 ## Rubric mapping
@@ -63,7 +70,7 @@ The tables below mark rows still *pending*.
 | # | Criterion (pts) | Evidence now | Pending |
 |---|---|---|---|
 | 1 | Accuracy and usefulness (15) | Prompt design (`analysis.py`); figure check withholds explanations whose numbers are not in the passage (`test_wrong_numbers_in_explanation_are_withheld`) | Real-model run on the evaluation set below, with findings checked by hand against the documents |
-| 2 | Grounding and traceability (15) | Every passage is a slice of the source (`test_analysis_returns_verified_findings_with_source_offsets`, e2e mismatch check); fabricated quotes dropped (`test_fabricated_quotes_are_never_shown`, `test_ask_fabricated_quote_withholds_answer`); "not found in the reviewed text" topics (`test_not_found_topics_use_safe_wording`); silent-document answer (`test_ask_document_silent`) | Count of `quotes_rejected` and hand-checked support on real outputs |
+| 2 | Grounding and traceability (15) | Every passage is a slice of the source (`test_analysis_returns_verified_findings_with_source_offsets`, e2e mismatch check); fabricated quotes dropped (`test_fabricated_quotes_are_never_shown`, `test_ask_fabricated_quote_withholds_answer`); missing points proposed and checked by the model (`test_missing_points_are_proposed_and_checked_by_the_model`); silent-document answer (`test_ask_document_silent`) | Count of `quotes_rejected` and hand-checked support on real outputs |
 | 3 | Uncertainty, refusal, escalation (15) | explicit / interpretation / concern / not_established; enforceability and "should I" escalate (`test_ask_enforceability_escalates`, `test_ask_advice_escalates`); legal conclusions screened (`test_legal_conclusions_are_screened`); jurisdiction note; governing-law limitation in summary | Real-model ambiguity and contradiction cases |
 | 4 | Privacy and network isolation (15) | Egress guard, loopback-only config, proxy bypass, no temp files, content-free logs (`test_privacy.py`); offline harness PASS with stand-in; `docs/privacy.md` | Offline run with real Ollama + Gemma on the laptop; Windows connection monitoring |
 | 5 | Gemma integration and deployment (10) | Engine for Ollama and llama.cpp; structured output schema; metrics endpoint; acquisition steps (`model-card.md`) | Measured cold start, latency, tokens/s, VRAM/RAM on the laptop |
@@ -82,7 +89,9 @@ Synthetic or licence-cleared documents only; no private documents.
 | Termination | rental fixture clause 6 | both the 30-day notice and the landlord's no-notice termination |
 | Vague clause | "deductions the Landlord considers reasonable" | `ambiguity`/`concern`, not explicit |
 | Contradiction | a fixture where two clauses give different notice periods (to write) | `ambiguous` answer citing both |
-| No concern | a plain clause (entry at reasonable times) | no high-priority concern invented |
+| No concern | a plain clause (entry at reasonable times) | no concern invented |
+| Same issue twice | `penalty_and_termination.txt` clause 2 | one penalty finding with both sentences; the termination right a separate finding |
+| Missing point | `marital_settlement.txt` | "Not addressed: child support" (the agreement names a child) |
 | Silent | "Are pets allowed?" | `not_in_document`, no passages |
 | Enforceability | "Is the late fee enforceable?" | `needs_professional`, escalation, jurisdiction note, passage clause 3 |
 | Fabricated citation | scripted engine (unit test) | quote dropped |

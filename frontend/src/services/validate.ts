@@ -16,7 +16,6 @@ import type {
   HealthResponse,
   ModelState,
   Passage,
-  Priority,
 } from '../types/api';
 
 export class MalformedResponseError extends Error {
@@ -69,7 +68,6 @@ const CATEGORIES = [
   'termination', 'renewal', 'ambiguity', 'concern', 'other',
 ] as const satisfies readonly FindingCategory[];
 const CLASSIFICATIONS = ['explicit', 'interpretation', 'concern', 'not_established'] as const satisfies readonly Classification[];
-const PRIORITIES = ['high', 'medium', 'low'] as const satisfies readonly Priority[];
 const EVIDENCE = ['verified', 'unverified', 'none'] as const satisfies readonly EvidenceStatus[];
 const ANSWER_TYPES = [
   'answered', 'not_in_document', 'ambiguous', 'needs_professional', 'out_of_scope',
@@ -137,8 +135,6 @@ function parseFinding(v: unknown, path: string): Finding {
     title: str(o.title, `${path}.title`),
     explanation: str(o.explanation, `${path}.explanation`),
     classification: oneOf(o.classification, `${path}.classification`, CLASSIFICATIONS),
-    priority: oneOf(o.priority, `${path}.priority`, PRIORITIES),
-    priority_reason: str(o.priority_reason ?? '', `${path}.priority_reason`),
     evidence_status: evidence,
     source_passages: passages,
     limitations: strings(o.limitations, `${path}.limitations`),
@@ -217,6 +213,7 @@ function parseTypeInfo(v: unknown): DocumentTypeInfo {
     detected_id: str(t.detected_id ?? t.id, 'analysis.document_type.detected_id'),
     confidence: oneOf(t.confidence, 'analysis.document_type.confidence', ['high', 'low'] as const),
     alternatives: strings(t.alternatives, 'analysis.document_type.alternatives'),
+    method: strOrNull(t.method, 'analysis.document_type.method'),
   };
 }
 

@@ -128,3 +128,8 @@ def find_injection_spans(text: str) -> list[tuple[int, int]]:
 def fence_document_text(text: str) -> str:
     """Neutralise anything that could close our excerpt delimiters."""
     return text.replace("<", "‹").replace(">", "›")
+
+
+INJECTION_LIMITATION = (
+    "Found by a fixed security check for text addressed to an AI system, not by the model. It flags the wording only."
+)

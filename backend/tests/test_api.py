@@ -43,8 +43,8 @@ def test_analysis_returns_verified_findings_with_source_offsets():
     assert body["processing"]["model_calls"] == len(engine.calls) >= 2
     assert "not legal advice" in body["disclaimer"].lower()
     # Document text is sent to the model only inside the excerpt delimiters.
-    system, user = engine.calls[0]
-    assert "Vikram" not in system and '<document_excerpt id="c' in user
+    system, user = next(c for c in engine.calls if '<document_excerpt id="c' in c[1])
+    assert "Vikram" not in system and "Vikram" in user
 
 
 def test_glossary_terms_must_exist_in_document():
@@ -53,15 +53,29 @@ def test_glossary_terms_must_exist_in_document():
     assert "security deposit" in terms and "indemnity" not in terms
 
 
-def test_not_found_topics_use_safe_wording():
+def test_missing_points_are_proposed_and_checked_by_the_model():
+    client, engine = make_client()
+    engine.missing = [
+        {"topic": "Pets", "why_it_matters": "The flat is let to a family but nothing says whether pets are allowed.",
+         "suggested_action": "Ask the Landlord whether pets are allowed.", "search_terms": ["pets", "animals"]},
+        {"topic": "security deposit", "why_it_matters": "Money is held.", "suggested_action": None, "search_terms": ["deposit"]},
+    ]
+    body = upload(client, "rental.txt", RENTAL).json()
+    # Proposals come from the model; the model's own check against related passages decides which stay.
+    assert [n["topic"] for n in body["not_found"]] == ["Pets"]
+    missing = [f for f in body["findings"] if f["title"].startswith("Not addressed:")]
+    assert [f["title"] for f in missing] == ["Not addressed: Pets"]
+    f = missing[0]
+    assert f["evidence_status"] == "none" and f["classification"] == "not_established" and f["source_passages"] == []
+    assert f["next_step"] == "Ask the Landlord whether pets are allowed." and "does not appear to address" in f["explanation"]
+    check = next(u for _, u in engine.calls if "Decide whether the document addresses" in u)
+    assert "1. Pets (related excerpts" in check and "<document_excerpt" in check
+    assert body["findings"][-1]["title"] == "Not addressed: Pets"  # missing points come after the cited ones
+
+
+def test_no_missing_points_when_the_model_proposes_none():
     body = analyse()[2].json()
-    topics = {n["topic"]: n["note"] for n in body["not_found"]}
-    # Topics come from the detected type (rental), not one fixed list for every document.
-    assert "Lock-in period" in topics and "Subletting or use restrictions" in topics
-    assert "Liability or indemnity" not in topics and "Security deposit" not in topics
-    assert all(note.startswith("Not found in the reviewed text") for note in topics.values())
-    assert "rental or lease agreement often addresses this, but not always" in topics["Lock-in period"]
-    assert "Termination or ending the agreement" not in topics
+    assert body["not_found"] == [] and not any(f["title"].startswith("Not addressed") for f in body["findings"])
 
 
 def test_fabricated_quotes_are_never_shown():
@@ -212,32 +226,23 @@ def test_model_concerns_are_shown_as_concerns():
     f = deposit[0]
     assert f["category"] == "ambiguity" and f["classification"] == "concern" and f["evidence_status"] == "verified"
     assert "considers reasonable" in f["source_passages"][0]["text"]
-    assert f["next_step"] == "Which deductions can be made from the deposit?"
-    # The wording rule for the same sentence does not add a second, duplicate concern.
-    assert not any(x["title"] == "Left to one party's judgement" for x in body["findings"])
+    assert f["next_step"] == "Ask the Landlord to list which deductions can be made from the deposit."
+    assert f["impact"] == "Part of the deposit could be kept without a clear basis."
     assert_passages_match_source(client, body)
 
 
-def test_wording_rules_flag_what_the_model_missed():
+def test_every_finding_comes_from_the_model_or_the_security_check():
     body = analyse()[2].json()
-    by_title = {f["title"]: f for f in body["findings"]}
-    termination = by_title["Action allowed without notice"]
-    assert "without notice" in termination["source_passages"][0]["text"]
-    late = by_title["Daily charge with no stated limit"]
-    assert late["source_passages"][0]["text"].startswith("If rent is not received")
-    assert "Rs. 500 for each day" in late["source_passages"][0]["text"]
-    assert by_title["Terms left to be agreed later"]["category"] == "ambiguity"
-    for f in (termination, late):
-        assert f["classification"] == "concern" and "fixed wording check" in f["limitations"][0]
-    # A plain clause is not turned into a concern.
-    assert not any("enter the premises" in p["text"] for f in body["findings"] if f["classification"] == "concern" for p in f["source_passages"])
+    for f in body["findings"]:
+        assert "priority" not in f and "priority_reason" not in f
+        assert f["title"].startswith("Clause in") or f["title"] == "Deposit deductions not defined", f["title"]
 
 
-def test_fabricated_concern_quote_is_dropped_and_rule_backs_it_up():
+def test_fabricated_concern_quote_is_dropped():
     body = analyse("fabricate")[2].json()
     assert "keep the whole deposit" not in str(body)
-    rule = [f for f in body["findings"] if f["title"] == "Left to one party's judgement"]
-    assert rule and "considers reasonable" in rule[0]["source_passages"][0]["text"]
+    deposit = [f for f in body["findings"] if f["title"] == "Deposit deductions not defined"]
+    assert deposit and deposit[0]["evidence_status"] == "none" and deposit[0]["classification"] == "not_established"
 
 
 def test_glossary_matches_whole_words_and_skips_headings():
@@ -247,12 +252,12 @@ def test_glossary_matches_whole_words_and_skips_headings():
     assert "RENTAL" not in text and "monthly rent" in text
 
 
-def test_document_type_falls_back_to_title_line():
-    from clausewise.analysis import guess_document_type
-
-    assert guess_document_type(RENTAL.decode()) == "residential rental agreement"
-    assert guess_document_type("This deed of employment is made between the Employer and the Employee.") == "employment document"
-    assert guess_document_type("Shopping list: milk, bread.") is None
+def test_unusable_type_answer_falls_back_to_general_with_warning():
+    client, engine = make_client()
+    engine.type_answer = "spaceship"
+    body = upload(client, "rental.txt", RENTAL).json()
+    assert body["document_type"]["id"] == "general" and body["document_type"]["method"] == "fallback"
+    assert any(w["code"] == "type_not_detected" for w in body["warnings"]) and body["findings"]
 
 
 def test_glossary_term_only_in_a_heading_cites_the_text_under_it():
@@ -313,35 +318,27 @@ import pytest  # noqa: E402
 
 
 @pytest.mark.parametrize(
-    "name,type_id,expect_missing,expect_present",
-    [
-        ("rental_agreement.txt", "rental", "Lock-in period", "Security deposit"),
-        ("employment_contract.txt", "employment", "Leave and working hours", "Probation"),
-        ("legal_notice.txt", "legal_notice", None, "What is demanded"),
-        ("service_agreement.txt", "service", "Dispute resolution", "Service levels"),
-        ("nda.txt", "nda", "Remedies for breach", "Exclusions"),
-    ],
+    "name,type_id",
+    [("rental_agreement.txt", "rental"), ("employment_contract.txt", "employment"), ("legal_notice.txt", "legal_notice"),
+     ("service_agreement.txt", "service"), ("nda.txt", "nda"), ("marital_settlement.txt", "family")],
 )
-def test_each_document_type_gets_its_own_analysis(name, type_id, expect_missing, expect_present):
+def test_model_detects_the_type_and_it_goes_into_the_prompts(name, type_id):
     client, engine, body = _analyse_fixture(name)
-    assert body["document_type"]["id"] == type_id and body["document_type"]["source"] == "detected"
-    assert body["document_type"]["confidence"] == "high"
-    missing = {n["topic"] for n in body["not_found"]}
-    if expect_missing:
-        assert expect_missing in missing
-    assert expect_present not in missing
-    # The prompt names the type and its focus points; findings are grounded.
-    _, user = engine.calls[0]
-    label = body["document_type"]["label"]
-    assert f"Document type: {label}." in user and "only where the excerpts actually contain them" in user
-    assert body["findings"] and all(f["evidence_status"] == "verified" for f in body["findings"])
+    t = body["document_type"]
+    assert t["id"] == type_id and t["source"] == "detected" and t["method"] == "model" and t["confidence"] == "high"
+    classify = engine.calls[0][1]
+    assert "Choose type_id from this list" in classify and '<document_excerpt id="start">' in classify
+    _, user = engine.calls[1]
+    assert f"Document type: {t['label']}." in user and "Report each underlying issue once" in user
+    assert body["findings"] and all(f["evidence_status"] == "verified" for f in body["findings"] if not f["title"].startswith("Not addressed"))
     assert_passages_match_source(client, body)
 
 
 def test_document_type_can_be_chosen_and_changed():
     client, engine, body = _analyse_fixture("service_agreement.txt", document_type="freelance")
     assert body["document_type"]["id"] == "freelance" and body["document_type"]["source"] == "user"
-    assert body["document_type"]["detected_id"] == "service"
+    assert body["document_type"]["detected_id"] is None  # the user's choice is used without a detection call
+    assert not any("Choose type_id" in u for _, u in engine.calls)
     resp = client.post(f"/api/documents/{body['document_id']}/reanalyse", json={"document_type": "auto"})
     assert resp.status_code == 200 and resp.json()["document_type"]["id"] == "service"
     assert resp.json()["document_id"] == body["document_id"]
@@ -385,12 +382,6 @@ def test_questions_use_the_right_document(name, present_q, present_word, absent_
     assert "could not find a passage" in absent["answer"]
 
 
-def test_service_agreement_wording_concerns():
-    _, _, body = _analyse_fixture("service_agreement.txt")
-    titles = {f["title"] for f in body["findings"]}
-    assert "Renews automatically" in titles and "Action allowed without notice" in titles
-
-
 def test_impact_is_shown_and_checked_against_the_passage():
     body = analyse()[2].json()
     assert any(f["impact"] == "This sets what you must do under this clause." for f in body["findings"])
@@ -406,3 +397,23 @@ def test_questions_stay_on_their_own_document():
     _, prompt = engine.calls[-1]
     assert "Priya Sharma" in prompt or "sixty (60) days" in prompt
     assert "Vikram" not in prompt and "Landlord" not in prompt
+
+
+def test_divorce_settlement_missing_child_support_is_raised():
+    client, engine, body = _analyse_fixture("marital_settlement.txt")
+    assert body["document_type"]["id"] == "family"
+    missing = [f for f in body["findings"] if f["title"].startswith("Not addressed:")]
+    assert [f["title"] for f in missing] == ["Not addressed: Child support"]
+    assert missing[0]["next_step"].startswith("Ask for the amount") and "names a child" in missing[0]["explanation"]
+    assert [n["topic"] for n in body["not_found"]] == ["Child support"]
+
+
+def test_upload_and_paste_use_the_same_pipeline():
+    client, engine = make_client()
+    a = upload(client, "rental.txt", RENTAL).json()
+    calls_upload = [u.split("\n", 1)[0] for _, u in engine.calls]
+    engine.calls.clear()
+    b = client.post("/api/documents/text", json={"text": RENTAL.decode()}).json()
+    assert [u.split("\n", 1)[0] for _, u in engine.calls] == calls_upload
+    strip = lambda body: [(f["title"], [p["text"] for p in f["source_passages"]]) for f in body["findings"]]
+    assert strip(a) == strip(b)

@@ -1,6 +1,6 @@
 import type { Finding } from '../../types/api';
-import { CATEGORY_LABEL, passageLocation } from '../../utils/labels';
-import { ClassificationBadge, EvidenceBadge, PriorityTag } from '../common/Badges';
+import { CATEGORY_LABEL, isNotAddressed, passageLocation } from '../../utils/labels';
+import { ClassificationBadge, EvidenceBadge } from '../common/Badges';
 
 interface Props {
   finding: Finding;
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function FindingCard({ finding, selected, onSelect }: Props) {
-  const first = finding.source_passages[0];
+  const hasPassage = finding.source_passages.length > 0;
   return (
     <button
       type="button"
@@ -19,7 +19,9 @@ export function FindingCard({ finding, selected, onSelect }: Props) {
     >
       <span className="finding-card__top">
         <span className="category">{CATEGORY_LABEL[finding.category]}</span>
-        <PriorityTag value={finding.priority} />
+        {finding.source_passages.length > 1 && (
+          <span className="finding-card__count">{finding.source_passages.length} passages</span>
+        )}
       </span>
       <span className="finding-card__title">{finding.title}</span>
       <span className="finding-card__badges">
@@ -28,21 +30,28 @@ export function FindingCard({ finding, selected, onSelect }: Props) {
       <span className="finding-card__explanation">{finding.explanation}</span>
       {finding.impact && (
         <span className="finding-card__impact">
-          <strong>Why it may matter:</strong> {finding.impact}
+          <strong>Why it matters:</strong> {finding.impact}
         </span>
       )}
-      {first ? (
-        <span className="finding-card__quote">
-          <span className="quote-text">“{first.text}”</span>
-          <span className="quote-meta">
-            {passageLocation(first)}
-            {finding.source_passages.length > 1 && ` · +${finding.source_passages.length - 1} more`}
-          </span>
+      {/* A finding can merge up to three passages about the same issue; every one is shown. */}
+      {finding.source_passages.map((p, i) => (
+        <span key={`${p.char_start ?? 'x'}-${i}`} className="finding-card__quote">
+          <span className="quote-text">“{p.text}”</span>
+          <span className="quote-meta">{passageLocation(p)}</span>
         </span>
-      ) : null}
+      ))}
+      {finding.next_step && (
+        <span className="finding-card__action">
+          <strong>Suggested action:</strong> {finding.next_step}
+        </span>
+      )}
       <span className="finding-card__foot">
-        <EvidenceBadge value={finding.evidence_status} />
-        <span className="finding-card__open">{first ? 'Show passage' : 'View details'}</span>
+        {isNotAddressed(finding.title) ? (
+          <span className="evidence-status evidence-status--absent">Not found in the document</span>
+        ) : (
+          <EvidenceBadge value={finding.evidence_status} />
+        )}
+        <span className="finding-card__open">{hasPassage ? (finding.source_passages.length > 1 ? 'Show passages' : 'Show passage') : 'View details'}</span>
       </span>
     </button>
   );

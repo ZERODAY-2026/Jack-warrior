@@ -25,7 +25,7 @@ import { DocumentTypeCard } from './components/doctype/DocumentTypeCard';
 import { sourceName, useDocumentSession } from './hooks/useDocumentSession';
 import { api } from './services/api';
 import type { DocumentText, Passage } from './types/api';
-import { CATEGORY_LABEL } from './utils/labels';
+import { CATEGORY_LABEL, isNotAddressed } from './utils/labels';
 import { DEFAULT_RULES, describeFile, formatBytes, type FileRules } from './utils/validateFile';
 
 type Selection = { kind: 'finding' | 'answer' | 'term'; id: string } | null;
@@ -137,7 +137,7 @@ export default function App() {
         escalation: null,
         jurisdictionNote: null,
         impact: f.impact,
-        risk: { level: f.priority, reason: f.priority_reason },
+        notAddressed: isNotAddressed(f.title),
       };
     }
     if (selection.kind === 'term') {

@@ -21,3 +21,10 @@ Newest first. Record anything a teammate (or a new session) would otherwise have
 1. Confirm the laptop specs and OS (Windows native or WSL2?). Run `python scripts/env_report.py` there.
 2. Document scope for testing and the demo: rental and employment agreements in English are the proposal.
 3. Confirm Apache-2.0.
+
+## 2026-10-18, later (backend v0.6)
+
+- **No risk levels** (Sanjay's decision): `priority` and `priority_reason` removed from findings, prompts, schemas, UI and docs. No other severity ranking replaces them; findings are in document order. The guide asks to "highlight potential risks or ambiguities", which concern findings still do; it does not ask for a rating.
+- **Gemma makes the analysis decisions** (Sanjay's decision): keyword type detection, per-type topic checklists, fixed wording rules and the computed risk score were removed. Gemma now picks the type, finds concerns, merges duplicates, and proposes and checks missing points. Kept as fixed code: quote verification, figure checks, legal-conclusion screening, escalation of validity and advice questions, the instruction-like-text warning, and keyword ranking of chunks when a long document exceeds the analysis budget.
+- **Duplicates fixed at the source and by a Gemma merge call**, not by a similarity threshold. Only exact repeats (same title, same passages) are removed by code.
+- **Earlier request (11:09) for type-specific analysis** is now met by passing Gemma's type label into the prompts, without per-type rules.

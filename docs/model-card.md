@@ -29,7 +29,7 @@
 | Hardware of the target laptop (GPU, VRAM, driver, RAM, OS) | Verified 2026-10-18 with `scripts/env_report.py`: Windows 11 (10.0.26300, native), NVIDIA GeForce RTX 3050 6GB Laptop GPU (6144 MiB), driver 581.86, CUDA 13.0, Intel CPU with 12 logical cores, 15.7 GB RAM, Python 3.13.7, Ollama 0.40.6. Ollama reports `gemma3n:e2b` as 7.30 GB, 4.5B parameters, Q4_K_M. |
 | First real inference | 2026-10-18 on the laptop above, `scripts/e2e_check.py` on `rental_agreement.txt` (1,309 chars, 9 chunks): analysis 24.8 s with 2 model calls, 6 findings, 0 quotes rejected, 0 passage mismatches; document questions 2.75 s and 3.03 s; warm-up call 523 ms (model was probably already loaded by an earlier `ollama run`). Escalation and silent-document questions answered without a model call (0.02 s). No outbound connection attempts. |
 | Memory and speed | `ollama ps` during the run: 2.4 GB, **100% GPU**, context 8192, llama.cpp runner. `GET /api/metrics`: 5 calls, average 6,210 ms, 52.09 output tokens/s. A longer PDF is still to be timed. |
-| Output quality (hand review) | Findings accurate and grounded; no concerns raised by the model on the first run, so a `concerns` list and a fixed wording check were added (see `evaluation.md`). Not yet re-run. |
+| Output quality (hand review) | Two real runs reviewed in `evaluation.md`. The pipeline changed afterwards (v0.6: one finding per issue, Gemma merge step, Gemma type detection and missing-point check, fixed wording rules removed), so the real model has **not yet been run on the current version**. |
 
 Results will be added here only after they are measured. No numbers in this file are estimates presented as measurements.
 
@@ -49,9 +49,14 @@ Gemma does the document understanding; the backend constrains and checks it:
 
 | Task | Gemma's role | Deterministic checks around it |
 |---|---|---|
-| Clause analysis | Reads each window of clauses and writes findings (category, plain-language explanation, explicit/interpretation/concern, priority, a suggested next step, the exact quote) and a separate list of concerns (vague, one-sided, no limit, conflict, missing) | Quote must be found in the source; passage text copied from source; figures checked; legal conclusions removed; enums coerced; a fixed wording check adds concerns the model missed, labelled as such |
-| Summary and glossary | Writes a plain summary, document-type guess, and explains legal terms used in the document | Sentences with figures absent from the document removed; glossary terms must occur in the document |
-| Questions | Answers from retrieved passages, classifies the answer type and cites quotes | Answer withheld when no quote verifies; legal-judgment/advice questions escalated regardless of the model |
+| Document type | Reads the start of the document and picks a type from the list, with confidence and alternatives (skipped when the user chose the type) | Unknown answers fall back to "Other legal document" with a warning |
+| Clause analysis | Reads each window of clauses and writes one finding per distinct issue: category, plain-language explanation, why it matters, explicit/interpretation/concern, a suggested action only when useful, missing context, and 1-3 exact quotes | Every quote must be found in the source; passage text copied from source; figures checked; legal conclusions removed; enums coerced |
+| Merging duplicates | Groups findings from all windows that describe the same issue and writes the combined title and explanation | Invalid groups ignored; merged text with figures not in the passages replaced by the original; passages of every member kept; security-check findings never rewritten |
+| Summary, glossary, missing points | Writes a plain summary, explains legal terms used in the document, and proposes important points this document gives reason to expect but may not address | Figures absent from the document removed; glossary terms must occur in the document |
+| Checking missing points | Decides, for each proposed point, whether the passages most related to it (retrieved by BM25) address it | Only points it finds unaddressed are reported, with no passage and labelled not established |
+| Questions | Answers from retrieved passages, classifies the answer type (including "needs a professional") and cites quotes | Answer withheld when no quote verifies; legal-judgment and advice questions escalated regardless of the model |
+
+The only finding the code creates without the model is the security warning for text addressed to an AI system (`docs/security.md`). There are no keyword rules, per-type checklists or fixed recommendations in the analysis.
 
 ## Known limitations
 

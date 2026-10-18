@@ -1,10 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { Classification, Finding, FindingCategory, Priority } from '../../types/api';
-import { CATEGORY_LABEL, CLASSIFICATION_LABEL, PRIORITY_LABEL } from '../../utils/labels';
+import type { Classification, Finding, FindingCategory } from '../../types/api';
+import { CATEGORY_LABEL, CLASSIFICATION_LABEL } from '../../utils/labels';
 import { FindingCard } from './FindingCard';
 import { Reveal } from '../motion/Reveal';
-
-const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
 interface Props {
   findings: Finding[];
@@ -15,7 +13,6 @@ interface Props {
 export function FindingsList({ findings, selectedId, onSelect }: Props) {
   const [category, setCategory] = useState<FindingCategory | 'all'>('all');
   const [classification, setClassification] = useState<Classification | 'all'>('all');
-  const [priority, setPriority] = useState<Priority | 'all'>('all');
 
   // Only offer filter values that actually occur in this document.
   const categories = useMemo(() => [...new Set(findings.map((f) => f.category))], [findings]);
@@ -25,10 +22,8 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
     () =>
       findings
         .filter((f) => category === 'all' || f.category === category)
-        .filter((f) => classification === 'all' || f.classification === classification)
-        .filter((f) => priority === 'all' || f.priority === priority)
-        .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]),
-    [findings, category, classification, priority],
+        .filter((f) => classification === 'all' || f.classification === classification),
+    [findings, category, classification],
   );
 
   if (findings.length === 0) {
@@ -40,7 +35,7 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
     );
   }
 
-  const filtered = category !== 'all' || classification !== 'all' || priority !== 'all';
+  const filtered = category !== 'all' || classification !== 'all';
 
   return (
     <div className="findings">
@@ -63,15 +58,6 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
             ))}
           </select>
         </label>
-        <label>
-          <span>Risk level</span>
-          <select value={priority} onChange={(e) => setPriority(e.target.value as Priority | 'all')}>
-            <option value="all">Any risk level</option>
-            {(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => (
-              <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
-            ))}
-          </select>
-        </label>
         {filtered && (
           <button
             type="button"
@@ -79,7 +65,6 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
             onClick={() => {
               setCategory('all');
               setClassification('all');
-              setPriority('all');
             }}
           >
             Clear filters
@@ -87,7 +72,7 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
         )}
       </div>
       <p className="muted findings__count" aria-live="polite">
-        Showing {shown.length} of {findings.length} findings, highest risk first
+        Showing {shown.length} of {findings.length} findings, in document order
       </p>
       {shown.length === 0 ? (
         <p className="empty-state">No findings match these filters.</p>

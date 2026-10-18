@@ -49,6 +49,7 @@ export const analysis = (
     detected_id: 'rental',
     confidence: 'high',
     alternatives: [],
+    method: 'model',
   },
 ): AnalysisResult => ({
   document_id: id,
@@ -73,8 +74,6 @@ export const analysis = (
       title: 'Termination with 30 days notice',
       explanation: 'Either side can end the agreement with 30 days written notice.',
       classification: 'explicit',
-      priority: 'high',
-      priority_reason: 'Controls how you can leave the agreement.',
       evidence_status: 'verified',
       source_passages: [
         { text: termText, page: 2, section: null, char_start: termStart, char_end: termStart + termText.length, verified: true },
@@ -89,8 +88,6 @@ export const analysis = (
       title: 'Late fee amount is not defined',
       explanation: 'The document mentions a "reasonable fee" without an amount.',
       classification: 'concern',
-      priority: 'medium',
-      priority_reason: 'Unclear costs if rent is late.',
       evidence_status: 'verified',
       source_passages: [
         { text: 'A reasonable fee may apply for late payment.', page: 2, section: null, char_start: null, char_end: null, verified: true },
@@ -105,8 +102,6 @@ export const analysis = (
       title: 'Deposit return',
       explanation: 'The deposit return timeline could not be established.',
       classification: 'not_established',
-      priority: 'low',
-      priority_reason: 'Reference only.',
       evidence_status: 'none',
       source_passages: [],
       limitations: [],
