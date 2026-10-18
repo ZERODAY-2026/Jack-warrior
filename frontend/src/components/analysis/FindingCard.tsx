@@ -26,6 +26,11 @@ export function FindingCard({ finding, selected, onSelect }: Props) {
         <ClassificationBadge value={finding.classification} />
       </span>
       <span className="finding-card__explanation">{finding.explanation}</span>
+      {finding.impact && (
+        <span className="finding-card__impact">
+          <strong>Why it may matter:</strong> {finding.impact}
+        </span>
+      )}
       {first ? (
         <span className="finding-card__quote">
           <span className="quote-text">“{first.text}”</span>
@@ -37,7 +42,7 @@ export function FindingCard({ finding, selected, onSelect }: Props) {
       ) : null}
       <span className="finding-card__foot">
         <EvidenceBadge value={finding.evidence_status} />
-        <span className="finding-card__open">View evidence</span>
+        <span className="finding-card__open">{first ? 'Show passage' : 'View details'}</span>
       </span>
     </button>
   );

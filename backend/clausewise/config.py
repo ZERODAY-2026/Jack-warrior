@@ -81,7 +81,7 @@ class Settings:
     model_name: str = "gemma3n:e2b"
     num_ctx: int = 8192
     temperature: float = 0.1
-    max_output_tokens: int = 1024
+    max_output_tokens: int = 1536
     request_timeout_s: float = 600.0
     warmup: bool = True
 
@@ -118,7 +118,7 @@ class Settings:
             model_name=_env("MODEL", "gemma3n:e2b"),
             num_ctx=_env_int("NUM_CTX", 8192, 1024),
             temperature=_env_float("TEMPERATURE", 0.1),
-            max_output_tokens=_env_int("MAX_OUTPUT_TOKENS", 1024, 64),
+            max_output_tokens=_env_int("MAX_OUTPUT_TOKENS", 1536, 64),
             request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 600.0),
             warmup=_env_bool("WARMUP", True),
             max_file_bytes=_env_int("MAX_FILE_BYTES", 10 * 1024 * 1024),

@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
-import { analysis, documentText, enforceable, health, notInDocument } from './fixtures/responses';
+import { analysis, DOCUMENT_TYPES, documentText, enforceable, health, notInDocument } from './fixtures/responses';
 import { deferred, json, mockBackend, textFile } from './helpers';
 
 const user = () => userEvent.setup({ applyAccept: false });
@@ -111,8 +111,8 @@ describe('App workflow', () => {
     const u = user();
     render(<App />);
     await screen.findByRole('button', { name: /model ready/i });
-    await u.upload(screen.getByTestId('file-input'), new File(['x'], 'contract.docx'));
-    expect(screen.getByRole('alert')).toHaveTextContent(/not supported/);
+    await u.upload(screen.getByTestId('file-input'), new File(['x'], 'contract.doc'));
+    expect(screen.getByRole('alert')).toHaveTextContent(/not supported.*saved as \.docx/);
     await u.upload(screen.getByTestId('file-input'), new File(['x'.repeat(2 * 1024 * 1024)], 'big.txt', { type: 'text/plain' }));
     expect(screen.getByRole('alert')).toHaveTextContent(/limit is 1.0 MB/);
     expect(calls.some((c) => c.url === '/api/documents')).toBe(false);
@@ -228,5 +228,216 @@ describe('App workflow', () => {
     await uploadAndAnalyze(u);
     expect(await screen.findByText(/does not understand/)).toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  });
+});
+
+describe('Word files and pasted text', () => {
+  it('uploads a .docx file and shows it as a Word document', async () => {
+    const a = analysis('d_docx', 'lease.docx');
+    a.document.file_type = 'docx';
+    a.document.page_count = null;
+    mockBackend({ 'GET /api/health': () => json(health()), 'POST /api/documents': () => json(a) });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('button', { name: /model ready/i });
+    expect(screen.getByText(/Drop a PDF, Word \(\.docx\) or TXT file here/)).toBeInTheDocument();
+    await u.upload(
+      screen.getByTestId('file-input'),
+      new File(['PK'], 'lease.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+    );
+    expect(screen.getByText(/Word document ·/)).toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: /analyse document/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'lease.docx' })).toBeInTheDocument();
+    expect(screen.getByText(/DOCX ·/)).toBeInTheDocument();
+  });
+
+  it('shows the backend message for a password-protected Word file', async () => {
+    mockBackend({
+      'GET /api/health': () => json(health()),
+      'POST /api/documents': () =>
+        json({ error: { code: 'encrypted_document', message: 'This document is password-protected.' } }, 400),
+    });
+    const u = user();
+    render(<App />);
+    await uploadAndAnalyze(u, new File(['PK'], 'locked.docx', { type: '' }));
+    expect(await screen.findByText('This document is password-protected.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /choose a different file/i })).toBeInTheDocument();
+  });
+
+  it('analyses pasted text via POST /api/documents/text with the title', async () => {
+    const a = analysis('d_paste', 'Clause 7');
+    const { calls } = mockBackend({
+      'GET /api/health': () => json(health()),
+      'POST /api/documents/text': () => json(a),
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('button', { name: /model ready/i });
+    await u.click(screen.getByRole('button', { name: /paste text/i }));
+    const analyseBtn = screen.getByRole('button', { name: /analyse text/i });
+    // Submitting nothing explains what is missing instead of calling the backend.
+    await u.click(analyseBtn);
+    expect(screen.getByRole('alert')).toHaveTextContent('Paste some text from the document first.');
+    expect(calls.some((c) => c.url === '/api/documents/text')).toBe(false);
+    await u.type(screen.getByLabelText(/name \(optional\)/i), 'Clause 7');
+    await u.type(screen.getByRole('textbox', { name: 'Document text' }), 'Either party may terminate with 30 days notice.');
+    await u.click(analyseBtn);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Clause 7' })).toBeInTheDocument();
+    expect(screen.getByText(/^Pasted text ·/)).toBeInTheDocument();
+    const call = calls.find((c) => c.url === '/api/documents/text')!;
+    expect(JSON.parse(call.init!.body as string)).toEqual({
+      text: 'Either party may terminate with 30 days notice.',
+      title: 'Clause 7',
+    });
+    expect((call.init!.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+
+  it('keeps pasted text available to retry after a timeout', async () => {
+    let n = 0;
+    mockBackend({
+      'GET /api/health': () => json(health()),
+      'POST /api/documents/text': () =>
+        ++n === 1 ? json({ error: { code: 'timeout', message: 'The local model took too long.' } }, 504) : json(analysis('d_p2', 'Pasted text')),
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('button', { name: /model ready/i });
+    await u.click(screen.getByRole('button', { name: /paste text/i }));
+    await u.type(screen.getByRole('textbox', { name: 'Document text' }), 'Rent is due on the 5th.');
+    await u.click(screen.getByRole('button', { name: /analyse text/i }));
+    expect(await screen.findByText('The local model took too long.')).toBeInTheDocument();
+    expect(screen.getByText(/Pasted text · 23 characters/)).toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: /try again/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Pasted text' })).toBeInTheDocument();
+  });
+
+  it('hides the paste option for a backend that does not support it', async () => {
+    const h = health();
+    h.limits.accepts_pasted_text = null;
+    mockBackend({ 'GET /api/health': () => json(h) });
+    render(<App />);
+    await screen.findByRole('button', { name: /model ready/i });
+    expect(screen.queryByRole('button', { name: /paste text/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('Document types (contract v0.4)', () => {
+  it('sends the chosen type with an upload and shows what the analysis assumed', async () => {
+    const chosen = analysis('d_t1', 'nda.txt', {
+      id: 'nda', label: 'Non-disclosure agreement', source: 'user', detected_id: 'general', confidence: 'high', alternatives: [],
+    });
+    const { calls } = mockBackend({
+      'GET /api/health': () => json(health()),
+      'GET /api/document-types': () => json(DOCUMENT_TYPES),
+      'POST /api/documents': () => json(chosen),
+    });
+    const u = user();
+    render(<App />);
+    const picker = await screen.findByRole('combobox', { name: 'Document type' });
+    expect(picker).toHaveValue('auto');
+    await u.selectOptions(picker, 'nda');
+    await uploadAndAnalyze(u);
+    expect(await screen.findByRole('heading', { level: 1, name: 'nda.txt' })).toBeInTheDocument();
+    const body = calls.find((c) => c.url === '/api/documents')!.init!.body as FormData;
+    expect(body.get('document_type')).toBe('nda');
+    expect(screen.getByText('Non-disclosure agreement', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText(/Chosen by you\. Detected type: Other legal document\./)).toBeInTheDocument();
+  });
+
+  it('does not send a type when left on auto-detect, for pasted text too', async () => {
+    const { calls } = mockBackend({
+      'GET /api/health': () => json(health()),
+      'GET /api/document-types': () => json(DOCUMENT_TYPES),
+      'POST /api/documents/text': () => json(analysis('d_t2', 'Pasted text')),
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('combobox', { name: 'Document type' });
+    await u.click(screen.getByRole('button', { name: /paste text/i }));
+    await u.type(screen.getByRole('textbox', { name: 'Document text' }), 'The employee shall give one month notice.');
+    await u.click(screen.getByRole('button', { name: /analyse text/i }));
+    await screen.findByRole('heading', { level: 1, name: 'Pasted text' });
+    const sent = JSON.parse(calls.find((c) => c.url === '/api/documents/text')!.init!.body as string);
+    expect(sent).toEqual({ text: 'The employee shall give one month notice.' });
+  });
+
+  it('asks the user to confirm a low-confidence type and re-analyses as the chosen one', async () => {
+    const unsure = analysis('d_t3', 'letter.txt', {
+      id: 'rental', label: 'Rental or lease agreement', source: 'detected', detected_id: 'rental', confidence: 'low', alternatives: ['legal_notice'],
+    });
+    const again = analysis('d_t3', 'letter.txt', {
+      id: 'legal_notice', label: 'Legal or demand notice', source: 'user', detected_id: 'rental', confidence: 'high', alternatives: [],
+    });
+    again.summary.text = 'A demand notice asking for unpaid rent within 15 days.';
+    const done = deferred<Response>();
+    const { calls } = mockBackend({
+      'GET /api/health': () => json(health()),
+      'GET /api/document-types': () => json(DOCUMENT_TYPES),
+      'POST /api/documents': () => json(unsure),
+      'POST /api/documents/d_t3/reanalyse': () => done.promise,
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('combobox', { name: 'Document type' });
+    await uploadAndAnalyze(u);
+    await screen.findByRole('heading', { level: 1, name: 'letter.txt' });
+    expect(screen.getByText(/it could also be Legal or demand notice/)).toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: /Termination with 30 days notice/ }));
+
+    await u.selectOptions(screen.getByRole('combobox', { name: 'Analyse as' }), 'legal_notice');
+    await u.click(screen.getByRole('button', { name: /analyse again/i }));
+    expect(await screen.findByText(/again as: Legal or demand notice/)).toBeInTheDocument();
+    expect(JSON.parse(calls.find((c) => c.url.endsWith('/reanalyse'))!.init!.body as string)).toEqual({ document_type: 'legal_notice' });
+
+    done.resolve(json(again));
+    expect(await screen.findByText('A demand notice asking for unpaid rent within 15 days.')).toBeInTheDocument();
+    expect(screen.getByText('Legal or demand notice', { selector: 'strong' })).toBeInTheDocument();
+    // The earlier selection belonged to the old findings, so the evidence panel starts empty.
+    await waitFor(() =>
+      expect(within(screen.getByRole('complementary', { name: 'Evidence' })).getByText(/Select a finding/)).toBeInTheDocument(),
+    );
+  });
+
+  it('keeps the earlier results when re-analysis fails', async () => {
+    mockBackend({
+      'GET /api/health': () => json(health()),
+      'GET /api/document-types': () => json(DOCUMENT_TYPES),
+      'POST /api/documents': () => json(analysis()),
+      'POST /api/documents/d_test1/reanalyse': () => json({ error: { code: 'analysis_failed', message: 'The model stopped.' } }, 500),
+    });
+    const u = user();
+    render(<App />);
+    await screen.findByRole('combobox', { name: 'Document type' });
+    await uploadAndAnalyze(u);
+    await screen.findByRole('heading', { level: 1, name: 'lease.txt' });
+    await u.click(screen.getByRole('button', { name: 'Change type' }));
+    await u.selectOptions(screen.getByRole('combobox', { name: 'Analyse as' }), 'employment');
+    await u.click(screen.getByRole('button', { name: /analyse again/i }));
+    expect(await screen.findByText(/Could not analyse it again: The model stopped\./)).toBeInTheDocument();
+    expect(screen.getByText(/Summary for lease.txt/)).toBeInTheDocument();
+  });
+
+  it('shows each finding as evidence, explanation, impact, risk level and suggested action', async () => {
+    mockBackend({
+      'GET /api/health': () => json(health()),
+      'POST /api/documents': () => json(analysis()),
+    });
+    const u = user();
+    render(<App />);
+    await uploadAndAnalyze(u);
+    await screen.findByRole('heading', { level: 1, name: 'lease.txt' });
+    expect(screen.queryByRole('combobox', { name: 'Document type' })).not.toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: /Termination with 30 days notice/ }));
+    const evidence = screen.getByRole('complementary', { name: 'Evidence' });
+    expect(within(evidence).getByText('Evidence from the document')).toBeInTheDocument();
+    expect(within(evidence).getByText('Explanation in plain language')).toBeInTheDocument();
+    expect(within(evidence).getByText('You must plan a month ahead if you want to move out.')).toBeInTheDocument();
+    expect(within(evidence).getByText('High risk')).toBeInTheDocument();
+    expect(within(evidence).getByText('Controls how you can leave the agreement.')).toBeInTheDocument();
+
+    await u.click(screen.getByRole('tab', { name: /findings/i }));
+    await u.click(screen.getByRole('button', { name: /Late fee amount/ }));
+    expect(within(evidence).getByText(/Ask the landlord to state the fee in writing/)).toBeInTheDocument();
+    expect(within(evidence).queryByText('Why it may matter')).not.toBeInTheDocument();
   });
 });

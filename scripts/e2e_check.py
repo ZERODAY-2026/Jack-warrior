@@ -5,6 +5,10 @@ passage is an exact slice of the extracted text, deletes the documents and
 writes a JSON report (timings, counts, answer types, model metrics).
 
     python scripts/e2e_check.py backend/tests/fixtures/rental_agreement.txt --out evidence/e2e.json
+    python scripts/e2e_check.py --all          # every sample document, with its own questions
+
+Questions for each sample come from backend/tests/fixtures/questions.json; the
+report puts each answer next to the expected outcome so a person can check it.
 
 The report contains excerpts of the documents you pass in, so use sample or
 synthetic documents, not private ones, if you intend to share it.
@@ -20,6 +24,10 @@ from pathlib import Path
 
 import httpx
 
+FIXTURES = Path(__file__).resolve().parent.parent / "backend" / "tests" / "fixtures"
+SAMPLES = ["rental_agreement.txt", "employment_contract.txt", "legal_notice.txt", "service_agreement.txt", "nda.txt"]
+CONTENT_TYPES = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
 DEFAULT_QUESTIONS = [
     "What is the notice period for ending this agreement?",
     "What happens if a payment is late?",
@@ -31,13 +39,20 @@ DEFAULT_QUESTIONS = [
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("files", nargs="+", type=Path)
+    ap.add_argument("files", nargs="*", type=Path)
+    ap.add_argument("--all", action="store_true", help="run every sample document in backend/tests/fixtures")
     ap.add_argument("--url", default="http://127.0.0.1:8000")
     ap.add_argument("--question", action="append", help="question to ask (repeatable); defaults to a built-in set")
     ap.add_argument("--out", type=Path, default=Path("evidence/e2e.json"))
     ap.add_argument("--timeout", type=float, default=1800)
     args = ap.parse_args()
-    questions = args.question or DEFAULT_QUESTIONS
+    files = list(args.files) + ([FIXTURES / n for n in SAMPLES] if args.all else [])
+    if not files:
+        ap.error("give one or more files, or --all")
+    try:
+        sample_questions = json.loads((FIXTURES / "questions.json").read_text(encoding="utf-8"))
+    except OSError:
+        sample_questions = {}
 
     client = httpx.Client(base_url=args.url, timeout=args.timeout, trust_env=False)
     health = client.get("/api/health").json()
@@ -48,8 +63,12 @@ def main() -> int:
 
     report: dict = {"health": health, "documents": []}
     ok = True
-    for path in args.files:
-        ctype = "application/pdf" if path.suffix.lower() == ".pdf" else "text/plain"
+    for path in files:
+        if args.question:
+            questions = [{"q": q, "expect": None} for q in args.question]
+        else:
+            questions = sample_questions.get(path.stem) or [{"q": q, "expect": None} for q in DEFAULT_QUESTIONS]
+        ctype = CONTENT_TYPES.get(path.suffix.lower(), "text/plain")
         t0 = time.perf_counter()
         resp = client.post("/api/documents", files={"file": (path.name, path.read_bytes(), ctype)})
         elapsed = time.perf_counter() - t0
@@ -65,16 +84,24 @@ def main() -> int:
             f["id"] for f in body["findings"] for p in f["source_passages"] if text[p["char_start"] : p["char_end"]] != p["text"]
         ]
         ok &= not mismatches
-        print(f"{path.name}: {len(body['findings'])} findings, {body['processing']['model_calls']} model calls, "
-              f"{body['processing']['quotes_rejected']} quotes rejected, {elapsed:.1f}s, passage mismatches: {len(mismatches)}")
+        concerns = sum(1 for f in body["findings"] if f["classification"] == "concern")
+        dt = body.get("document_type", {})
+        print(f"{path.name}: type {dt.get('id')} ({dt.get('confidence')}), {len(body['findings'])} findings ({concerns} concerns), "
+              f"{body['processing']['model_calls']} model calls, {body['processing']['quotes_rejected']} quotes rejected, "
+              f"{elapsed:.1f}s, passage mismatches: {len(mismatches)}")
+        if body.get("not_found"):
+            print("  not identified:", "; ".join(n["topic"] for n in body["not_found"]))
         answers = []
-        for q in questions:
+        for item in questions:
+            q = item["q"]
             t1 = time.perf_counter()
             a = client.post(f"/api/documents/{doc_id}/ask", json={"question": q}).json()
+            a["_expected"] = item.get("expect")
             a["_seconds"] = round(time.perf_counter() - t1, 2)
             bad = [p for p in a.get("source_passages", []) if text[p["char_start"] : p["char_end"]] != p["text"]]
             ok &= not bad
-            print(f"  Q: {q}\n     -> {a.get('answer_type')} ({a['_seconds']}s, {len(a.get('source_passages', []))} passages)")
+            print(f"  Q: {q}\n     -> {a.get('answer_type')} ({a['_seconds']}s, {len(a.get('source_passages', []))} passages)"
+                  + (f"   expected: {item['expect']}" if item.get("expect") else ""))
             answers.append(a)
         deleted = client.delete(f"/api/documents/{doc_id}").json()
         report["documents"].append({

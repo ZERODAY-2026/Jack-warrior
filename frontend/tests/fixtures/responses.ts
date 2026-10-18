@@ -1,6 +1,6 @@
 // Test-only fixtures shaped like docs/api-contract.md. The app never imports this file.
 // The text is a short synthetic rental clause written for these tests.
-import type { AnalysisResult, AskResponse, DocumentText, HealthResponse } from '../../src/types/api';
+import type { AnalysisResult, AskResponse, DocumentText, DocumentTypeOption, HealthResponse } from '../../src/types/api';
 
 export const PAGE_1 = 'RENTAL AGREEMENT\nThe Tenant shall pay rent of 12,000 on or before the 5th day of each month.\n';
 export const PAGE_2 =
@@ -17,7 +17,7 @@ export const health = (state: HealthResponse['model']['state'] = 'ready'): Healt
     detail: state === 'not_installed' ? 'Model file not found. Run the model setup script.' : null,
     parameter_size: '5B (E2B effective 2B)',
   },
-  limits: { max_file_bytes: 1024 * 1024, max_pages: 60, accepted_extensions: ['.pdf', '.txt'], max_question_chars: 300, ocr_supported: false },
+  limits: { max_file_bytes: 1024 * 1024, max_pages: 60, accepted_extensions: ['.pdf', '.docx', '.txt'], max_question_chars: 300, ocr_supported: false, accepts_pasted_text: true },
   privacy: {
     bind_host: '127.0.0.1',
     telemetry_enabled: false,
@@ -31,8 +31,28 @@ export const health = (state: HealthResponse['model']['state'] = 'ready'): Healt
 const termStart = PAGE_1.length;
 const termText = 'Either party may terminate this agreement by providing thirty (30) days written notice.';
 
-export const analysis = (id = 'd_test1', filename = 'lease.txt'): AnalysisResult => ({
+export const DOCUMENT_TYPES: DocumentTypeOption[] = [
+  { id: 'rental', label: 'Rental or lease agreement' },
+  { id: 'employment', label: 'Employment contract or offer letter' },
+  { id: 'legal_notice', label: 'Legal or demand notice' },
+  { id: 'nda', label: 'Non-disclosure agreement' },
+  { id: 'general', label: 'Other legal document' },
+];
+
+export const analysis = (
+  id = 'd_test1',
+  filename = 'lease.txt',
+  type: AnalysisResult['document_type'] = {
+    id: 'rental',
+    label: 'Rental or lease agreement',
+    source: 'detected',
+    detected_id: 'rental',
+    confidence: 'high',
+    alternatives: [],
+  },
+): AnalysisResult => ({
   document_id: id,
+  document_type: type,
   document: {
     filename,
     file_type: 'txt',
@@ -61,6 +81,7 @@ export const analysis = (id = 'd_test1', filename = 'lease.txt'): AnalysisResult
       ],
       limitations: [],
       next_step: null,
+      impact: 'You must plan a month ahead if you want to move out.',
     },
     {
       id: 'f_fee',
@@ -76,6 +97,7 @@ export const analysis = (id = 'd_test1', filename = 'lease.txt'): AnalysisResult
       ],
       limitations: ['What counts as reasonable may depend on local law.'],
       next_step: 'Ask the landlord to state the fee in writing.',
+      impact: null,
     },
     {
       id: 'f_deposit',
@@ -89,6 +111,7 @@ export const analysis = (id = 'd_test1', filename = 'lease.txt'): AnalysisResult
       source_passages: [],
       limitations: [],
       next_step: null,
+      impact: null,
     },
   ],
   glossary: [

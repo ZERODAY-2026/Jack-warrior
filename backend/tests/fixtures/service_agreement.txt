@@ -1,0 +1,21 @@
+SERVICE AGREEMENT
+
+This Service Agreement is entered into on 1 July 2026 between BrightCloud Hosting LLP ("the Provider") and Meera Textiles ("the Customer").
+
+1. SCOPE OF SERVICES
+The Provider shall host and maintain the Customer's online store and provide technical support by email.
+
+2. FEES
+The Customer shall pay a fee of Rs. 12,000 per month. Invoices are payable within fifteen (15) days of the invoice date.
+
+3. SERVICE LEVELS
+The Provider will make reasonable efforts to keep the store available 99.5% of the time each month. Scheduled maintenance is excluded.
+
+4. LIMITATION OF LIABILITY
+The Provider's total liability under this agreement shall not exceed the fees paid by the Customer in the preceding one (1) month.
+
+5. TERM AND RENEWAL
+This agreement continues for twelve (12) months and renews automatically for further twelve-month periods unless either party gives thirty (30) days' notice before the renewal date.
+
+6. CHANGES
+The Provider may change the fees at any time by posting the new fees on its website.

@@ -1,6 +1,6 @@
 # ClauseWise backend
 
-Local FastAPI service that reads PDF/TXT legal documents, analyses them with Gemma running on this machine, and returns findings with passages copied from the document. Not legal advice.
+Local FastAPI service that reads PDF, Word (.docx) and TXT legal documents, or pasted text,, analyses them with Gemma running on this machine, and returns findings with passages copied from the document. Not legal advice.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Environment variables (all optional):
 | `CLAUSEWISE_MODEL` | `gemma3n:e2b` | Model tag/name in the runtime |
 | `CLAUSEWISE_NUM_CTX` | `8192` | Context window requested from Ollama |
 | `CLAUSEWISE_TEMPERATURE` | `0.1` | |
-| `CLAUSEWISE_MAX_OUTPUT_TOKENS` | `1024` | Per call |
+| `CLAUSEWISE_MAX_OUTPUT_TOKENS` | `1536` | Per call (findings plus concerns need room) |
 | `CLAUSEWISE_REQUEST_TIMEOUT_S` | `600` | Per model call |
 | `CLAUSEWISE_WARMUP` | `1` | Load the model at startup with a content-free prompt |
 | `CLAUSEWISE_MAX_FILE_BYTES` | `10485760` | Upload limit |
@@ -64,7 +64,7 @@ Environment variables (all optional):
 clausewise/
   app.py              routes, error envelope, upload handling
   config.py           settings + loopback validation
-  document_parser.py  PDF/TXT extraction with page offsets
+  document_parser.py  PDF/DOCX/TXT extraction with page offsets
   chunking.py         source-preserving chunks
   retrieval.py        BM25 + legal synonyms
   gemma_engine.py     Ollama / llama.cpp clients (loopback only)

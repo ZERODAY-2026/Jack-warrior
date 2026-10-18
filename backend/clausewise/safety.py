@@ -47,7 +47,15 @@ _LEGAL_JUDGMENT = re.compile(
 )
 _ADVICE = re.compile(
     r"\b(should i|shall i|do i have to sign|is it safe to sign|safe to sign|"
-    r"what (?:should|do) i do|advise me|your (?:legal )?advice|recommend (?:that )?i)\b",
+    r"what (?:should|do) i do|advise me|your (?:legal )?advice|recommend (?:that )?i|"
+    r"am i (?:legally )?(?:obliged|obligated|required|bound) to)\b",
+    re.IGNORECASE,
+)
+# "Do I have to pay this?" asks whether to comply, not what the document says. Matched only as the
+# whole question, so "How many days do I have to pay?" stays a document question.
+_COMPLY = re.compile(
+    r"\s*(?:so |but |really )?(?:do|must) i (?:really |actually )?(?:(?:have|need) to )?"
+    r"(?:pay|comply|reply|respond|accept|agree|obey|follow)(?: with)?(?: (?:this|it|that|them|these|the \w+))?\s*\??\s*",
     re.IGNORECASE,
 )
 _JURISDICTION = re.compile(
@@ -60,7 +68,7 @@ _JURISDICTION = re.compile(
 def triage_question(question: str) -> QuestionTriage:
     if _LEGAL_JUDGMENT.search(question):
         kind = "legal_judgment"
-    elif _ADVICE.search(question):
+    elif _ADVICE.search(question) or _COMPLY.fullmatch(question):
         kind = "advice"
     else:
         kind = "document"

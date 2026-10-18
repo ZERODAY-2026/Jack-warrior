@@ -8,6 +8,8 @@ import type {
   Classification,
   DeleteResponse,
   DocumentText,
+  DocumentTypeInfo,
+  DocumentTypeOption,
   EvidenceStatus,
   Finding,
   FindingCategory,
@@ -97,6 +99,7 @@ export function parseHealth(v: unknown): HealthResponse {
       accepted_extensions: arr(limits.accepted_extensions, 'health.limits.accepted_extensions', str),
       max_question_chars: num(limits.max_question_chars, 'health.limits.max_question_chars'),
       ocr_supported: bool(limits.ocr_supported, 'health.limits.ocr_supported'),
+      accepts_pasted_text: boolOrNull(limits.accepts_pasted_text, 'health.limits.accepts_pasted_text'),
     },
     privacy: {
       bind_host: str(privacy.bind_host, 'health.privacy.bind_host'),
@@ -140,6 +143,7 @@ function parseFinding(v: unknown, path: string): Finding {
     source_passages: passages,
     limitations: strings(o.limitations, `${path}.limitations`),
     next_step: strOrNull(o.next_step, `${path}.next_step`),
+    impact: strOrNull(o.impact, `${path}.impact`),
   };
 }
 
@@ -157,9 +161,10 @@ export function parseAnalysis(v: unknown): AnalysisResult {
   }
   return {
     document_id: str(o.document_id, 'analysis.document_id'),
+    document_type: o.document_type === undefined || o.document_type === null ? null : parseTypeInfo(o.document_type),
     document: {
       filename: str(doc.filename, 'analysis.document.filename'),
-      file_type: oneOf(doc.file_type, 'analysis.document.file_type', ['pdf', 'txt'] as const),
+      file_type: oneOf(doc.file_type, 'analysis.document.file_type', ['pdf', 'txt', 'docx'] as const),
       size_bytes: num(doc.size_bytes, 'analysis.document.size_bytes'),
       page_count: numOrNull(doc.page_count, 'analysis.document.page_count'),
       char_count: num(doc.char_count, 'analysis.document.char_count'),
@@ -201,6 +206,25 @@ export function parseAnalysis(v: unknown): AnalysisResult {
     },
     disclaimer: str(o.disclaimer ?? 'Informational assistance only. Not legal advice.', 'analysis.disclaimer'),
   };
+}
+
+function parseTypeInfo(v: unknown): DocumentTypeInfo {
+  const t = obj(v, 'analysis.document_type');
+  return {
+    id: str(t.id, 'analysis.document_type.id'),
+    label: str(t.label, 'analysis.document_type.label'),
+    source: oneOf(t.source, 'analysis.document_type.source', ['detected', 'user'] as const),
+    detected_id: str(t.detected_id ?? t.id, 'analysis.document_type.detected_id'),
+    confidence: oneOf(t.confidence, 'analysis.document_type.confidence', ['high', 'low'] as const),
+    alternatives: strings(t.alternatives, 'analysis.document_type.alternatives'),
+  };
+}
+
+export function parseDocumentTypes(v: unknown): DocumentTypeOption[] {
+  return arr(v, 'document_types', (x, p) => {
+    const o = obj(x, p);
+    return { id: str(o.id, `${p}.id`), label: str(o.label, `${p}.label`) };
+  });
 }
 
 export function parseAsk(v: unknown): AskResponse {

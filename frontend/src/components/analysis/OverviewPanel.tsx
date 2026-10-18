@@ -3,6 +3,7 @@ import { CLASSIFICATION_HELP } from '../../utils/labels';
 import { ClassificationBadge } from '../common/Badges';
 import { Callout } from '../common/Callout';
 import { FindingCard } from './FindingCard';
+import { Reveal } from '../motion/Reveal';
 import { GlossaryCard } from './GlossaryCard';
 
 interface Props {
@@ -43,11 +44,15 @@ export function OverviewPanel({ analysis, selectedId, onSelect, onShowAll, selec
         <Callout key={w.code} tone="warning">{w.message}</Callout>
       ))}
 
-      <section className="card" aria-labelledby="summary-title">
+      <section className="card summary-card" aria-labelledby="summary-title">
         <p className="eyebrow">Plain-language summary{summary.document_type_guess && ` · looks like a ${summary.document_type_guess}`}</p>
         <h2 id="summary-title" className="visually-hidden">Summary</h2>
         <p className="summary-text">{summary.text}</p>
-        <p className="ai-note">AI-generated from the extracted text. Check findings against their quoted passages.</p>
+        <p className="ai-note">
+          AI-generated from the extracted text. Findings are specific to this document and each one links to the
+          passage it is based on. Anything marked as general information is not taken from the document. This is a
+          preliminary reading, not legal advice.
+        </p>
         {processing.quotes_rejected !== null && processing.quotes_rejected > 0 && (
           <p className="processing-note">
             {processing.quotes_rejected} {processing.quotes_rejected === 1 ? 'quote' : 'quotes'} proposed by the model did
@@ -81,16 +86,16 @@ export function OverviewPanel({ analysis, selectedId, onSelect, onShowAll, selec
       {top.length > 0 && (
         <section aria-labelledby="top-title">
           <div className="section-head">
-            <h2 id="top-title" className="card-title">Review first</h2>
+            <h2 id="top-title" className="card-title">Highest risk first</h2>
             <button type="button" className="button button--ghost button--small" onClick={onShowAll}>
               All {findings.length} findings
             </button>
           </div>
           <ul className="findings__list">
-            {top.map((f) => (
-              <li key={f.id}>
+            {top.map((f, i) => (
+              <Reveal as="li" key={f.id} index={i}>
                 <FindingCard finding={f} selected={f.id === selectedId} onSelect={onSelect} />
-              </li>
+              </Reveal>
             ))}
           </ul>
         </section>
@@ -100,10 +105,11 @@ export function OverviewPanel({ analysis, selectedId, onSelect, onShowAll, selec
 
       {not_found.length > 0 && (
         <section className="card" aria-labelledby="notfound-title">
-          <h2 id="notfound-title" className="card-title">Not found in the reviewed text</h2>
+          <h2 id="notfound-title" className="card-title">Not identified in the reviewed text</h2>
           <p className="muted">
-            Topics the analysis looked for but could not find. The document may still cover them in wording the tool
-            missed, or in pages it could not read.
+            Topics usually checked for this type of document that the analysis could not identify. This does not mean
+            the document lacks them: they may be worded differently, sit in pages that could not be read, or be left
+            out on purpose.
           </p>
           <ul className="not-found">
             {not_found.map((n) => (

@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Loader2, Scale, Send } from 'lucide-react';
+import { motion } from 'motion/react';
+import { fadeRise } from '../motion/Reveal';
 import type { QaEntry } from '../../hooks/useDocumentSession';
 import { AnswerTypeBadge, ClassificationBadge } from '../common/Badges';
 
@@ -78,7 +80,7 @@ export function AskPanel({ entries, maxChars, disabled, disabledReason, selected
 
       <ol className="qa-list" aria-label="Questions and answers" aria-live="polite">
         {[...entries].reverse().map((e) => (
-          <li key={e.id} className={`qa${e.id === selectedId ? ' is-selected' : ''}`}>
+          <motion.li key={e.id} className={`qa${e.id === selectedId ? ' is-selected' : ''}`} {...fadeRise} layout="position">
             <p className="qa__question">{e.question}</p>
             {e.status === 'pending' && (
               <p className="muted qa__pending">
@@ -91,7 +93,7 @@ export function AskPanel({ entries, maxChars, disabled, disabledReason, selected
               </p>
             )}
             {e.status === 'done' && e.response && (
-              <>
+              <motion.div className="qa__body" {...fadeRise}>
                 <div className="badge-row">
                   <AnswerTypeBadge value={e.response.answer_type} />
                   {e.response.answer_type === 'answered' && <ClassificationBadge value={e.response.classification} />}
@@ -108,9 +110,9 @@ export function AskPanel({ entries, maxChars, disabled, disabledReason, selected
                     ? `Show evidence (${e.response.source_passages.length} ${e.response.source_passages.length === 1 ? 'passage' : 'passages'})`
                     : 'Show details'}
                 </button>
-              </>
+              </motion.div>
             )}
-          </li>
+          </motion.li>
         ))}
       </ol>
     </div>

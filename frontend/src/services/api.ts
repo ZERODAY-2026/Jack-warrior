@@ -7,6 +7,7 @@ import type {
   AskResponse,
   DeleteResponse,
   DocumentText,
+  DocumentTypeOption,
   HealthResponse,
 } from '../types/api';
 import {
@@ -15,6 +16,7 @@ import {
   parseAsk,
   parseDelete,
   parseDocumentText,
+  parseDocumentTypes,
   parseHealth,
 } from './validate';
 
@@ -146,15 +148,45 @@ export const api = {
     return request('/health', parseHealth, { signal, timeoutMs: TIMEOUTS.health });
   },
 
-  analyze(file: File, signal?: AbortSignal): Promise<AnalysisResult> {
+  /** `documentType` is a type id from documentTypes(), or 'auto' to let the backend detect it. */
+  analyze(file: File, documentType = 'auto', signal?: AbortSignal): Promise<AnalysisResult> {
     const form = new FormData();
     form.append('file', file, file.name);
+    // Only sent when chosen, so backends older than v0.4 see the request they expect.
+    if (documentType !== 'auto') form.append('document_type', documentType);
     return request('/documents', parseAnalysis, {
       method: 'POST',
       body: form,
       signal,
       timeoutMs: TIMEOUTS.analyze,
     });
+  },
+
+  analyzeText(text: string, title: string | null, documentType = 'auto', signal?: AbortSignal): Promise<AnalysisResult> {
+    return request('/documents/text', parseAnalysis, {
+      method: 'POST',
+      json: {
+        text,
+        ...(title ? { title } : {}),
+        ...(documentType !== 'auto' ? { document_type: documentType } : {}),
+      },
+      signal,
+      timeoutMs: TIMEOUTS.analyze,
+    });
+  },
+
+  /** Runs the analysis again on a loaded document as another type ('auto' returns to the detected one). */
+  reanalyse(documentId: string, documentType: string, signal?: AbortSignal): Promise<AnalysisResult> {
+    return request(`/documents/${encodeURIComponent(documentId)}/reanalyse`, parseAnalysis, {
+      method: 'POST',
+      json: { document_type: documentType },
+      signal,
+      timeoutMs: TIMEOUTS.analyze,
+    });
+  },
+
+  documentTypes(signal?: AbortSignal): Promise<DocumentTypeOption[]> {
+    return request('/document-types', parseDocumentTypes, { signal, timeoutMs: TIMEOUTS.health });
   },
 
   ask(documentId: string, question: string, signal?: AbortSignal): Promise<AskResponse> {

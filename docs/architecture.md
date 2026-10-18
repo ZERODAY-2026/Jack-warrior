@@ -29,7 +29,7 @@ ClauseWise is a local web app: a React frontend and a Python backend, both on th
 5. **Analyse with Gemma.** One call per window. The system prompt holds the rules; document text goes only in the user turn inside `<document_excerpt id=… page=… section=…>` tags, with `<`/`>` in the document replaced so the text cannot close the tag. Ollama's structured-output mode constrains the reply to a JSON schema: `chunk_id`, `category`, `title`, `explanation`, `classification`, exact `quote`, `priority`, `priority_reason`, `next_step`.
 6. **Validate** (`citations.py`, `safety.py`). For each finding the quote is located in the source: exact match, then a whitespace/quote/case/hyphenation-normalised match, then a ≥ 0.90 fuzzy match restricted to the chunk the model named. The passage returned to the UI is always `text[start:end]` from the source. If the quote is not found it is discarded, the finding gets `evidence_status: none` and `classification: not_established`. Numbers in the explanation that do not occur in the cited passage cause the explanation to be withheld. Sentences stating legal conclusions ("is unenforceable", "you should not sign") are removed. Duplicate findings on overlapping passages are merged.
 7. **Summarise.** One more call over the document's opening and the verified findings produces the summary, a document-type guess and a glossary. Summary sentences with figures absent from the document are removed; glossary terms must occur in the document and their passage is taken from source.
-8. **Deterministic checks.** Topics such as termination, payment, penalties, renewal, dispute resolution, governing law and liability are searched with regexes; absent ones are reported as "Not found in the reviewed text". Prompt-injection-like text is detected with patterns and reported both as a warning and as a `concern` finding citing the passage.
+8. **Deterministic checks.** Topics such as termination, payment, penalties, renewal, dispute resolution, governing law and liability are searched with regexes; absent ones are reported as "Not found in the reviewed text". Prompt-injection-like text is detected with patterns and reported both as a warning and as a `concern` finding citing the passage. Wording a reader may want to question (one party decides alone, action without notice, a daily charge with no stated maximum, terms left to be agreed) is flagged by `wording.py` as a `concern`/`ambiguity` finding when the model raised no concern on that sentence; these findings say they come from the wording check.
 9. **Store** the extracted text, chunks, index and analysis in memory under a random id (`d_` + 96 random bits). `DELETE` removes them; documents also expire after one hour, and at most 20 are kept.
 
 ## Questions
@@ -53,3 +53,18 @@ ClauseWise is a local web app: a React frontend and a Python backend, both on th
 - **Document text is untrusted.** It can contain instructions; it never goes into the system prompt and is fenced in the user turn. Outputs are validated after inference whatever the model did.
 - **Model output is untrusted.** Quotes are re-derived from the source; enums are coerced; free text is length-capped and screened.
 - **The runtime URL must be loopback** (`config.require_loopback_url`); the backend refuses to start with a remote inference URL or a non-loopback bind address unless explicitly overridden.
+
+
+## Document types (added 2026-10-18)
+
+**Why output was generic.** Every document went through the same prompt and the same fixed list of "not found" topics, so an NDA or a legal notice was checked for rental-style points, and the model had no hint about what mattered for that kind of document.
+
+**What changed.** `clausewise/doc_types.py` defines ten types (rental, employment, legal notice, NDA, freelance/consulting, service, vendor/supply, partnership, terms and conditions, other). Each has weighted signal phrases for detection, a list of points to focus on, and the topics such documents usually address.
+- Detection is deterministic: title lines count three times, and the result has `high`/`low` confidence plus alternatives. The user can pick the type on upload or paste, or re-analyse a loaded document as another type.
+- The type goes into every prompt (findings, summary, questions), with the instruction to report only points the excerpts actually contain.
+- `not_found` uses the type's topics and says "not identified", not "missing".
+- Findings carry `impact`. The risk reason must point at the wording, and it falls back to `low` with the uncertainty stated.
+- Question answers name the clause or heading, explain terms plainly, and stay short by default.
+- Retrieval synonyms were widened for notices, employment and service terms. Whether-to-comply questions ("Do I have to pay this?") are escalated like advice.
+
+No new dependencies and no new model calls: the type changes what Gemma is asked, not how many times.

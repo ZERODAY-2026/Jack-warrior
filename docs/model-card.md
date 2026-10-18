@@ -10,13 +10,13 @@
 |---|---|---|
 | Model | Gemma 3n **E2B**, instruction-tuned | chosen |
 | Runtime | Ollama, tag `gemma3n:e2b` | chosen; alternative: llama.cpp `llama-server` with a Gemma 3n E2B GGUF |
-| Quantization | `Q4_K_M` (Ollama's default for this tag) | to confirm with `ollama show gemma3n:e2b` on the target machine |
-| Download size | about 5.6 GB (Ollama library listing, as known in mid-2026) | to confirm with `ollama list` |
+| Quantization | `Q4_K_M` (Ollama's default for this tag) | confirmed by Ollama's `/api/tags` on the laptop |
+| Download size | 7.8 GB in two layers (5.7 GB + 2.1 GB), measured by `ollama pull gemma3n:e2b` on the team laptop, 2026-10-18 (Ollama 0.40.6, Windows) | measured |
 | Licence | Gemma Terms of Use (https://ai.google.dev/gemma/terms) and the Gemma Prohibited Use Policy | read and accepted by the team before use |
 | Input used | text only | Gemma 3n also accepts images and audio; ClauseWise does not use them |
 | Context used | `num_ctx` 8192 (configurable); prompts are kept to about 4,000 characters of document text per call | |
 
-**Why E2B rather than E4B.** The developer laptop reportedly has an NVIDIA RTX 3050 Laptop GPU with about 6 GB of VRAM. E4B at Q4 is larger than 6 GB on its own (Ollama lists about 7.5 GB), so it would run mostly on CPU. E2B at Q4 is close to the VRAM size; Ollama places as many layers as fit on the GPU and runs the rest on CPU. We start with E2B and will try E4B only if E2B's findings are measurably worse and E4B's speed is acceptable.
+**Why E2B rather than E4B.** The laptop has an RTX 3050 with 6 GB of VRAM (verified). E2B runs fully on the GPU using 2.4 GB at context 8192 (measured), which leaves room, so E4B may also fit; it has not been tried. We will try E4B only if E2B's findings are measurably worse.
 
 **Gemma 4 E2B/E4B** is allowed by the guide but the guide itself says its details come from press coverage and must be confirmed on Google's model card. We have not verified it, so it is not the default. Switching is a configuration change (`CLAUSEWISE_MODEL=<tag>`), provided the tag runs in the chosen runtime.
 
@@ -26,8 +26,10 @@
 |---|---|
 | Backend talks to Ollama's `/api/tags` and `/api/chat` with a JSON schema in `format` | Verified against an Ollama-compatible test server (`tests/test_privacy.py`), not against real Ollama yet |
 | Gemma 3n E2B weights downloaded and run | **Not yet.** The cloud container used for development blocks huggingface.co, kaggle.com, ollama.com and registry.ollama.ai, and has no GPU. Real inference must be run on the team's laptop. |
-| Hardware of the target laptop (GPU, VRAM, driver, RAM, OS) | **Not yet verified.** Run `scripts/env_report.py` there and paste the output into this file. |
-| Memory and speed | **Not yet measured.** `scripts/e2e_check.py` and `GET /api/metrics` record cold start, per-call latency and tokens/s. |
+| Hardware of the target laptop (GPU, VRAM, driver, RAM, OS) | Verified 2026-10-18 with `scripts/env_report.py`: Windows 11 (10.0.26300, native), NVIDIA GeForce RTX 3050 6GB Laptop GPU (6144 MiB), driver 581.86, CUDA 13.0, Intel CPU with 12 logical cores, 15.7 GB RAM, Python 3.13.7, Ollama 0.40.6. Ollama reports `gemma3n:e2b` as 7.30 GB, 4.5B parameters, Q4_K_M. |
+| First real inference | 2026-10-18 on the laptop above, `scripts/e2e_check.py` on `rental_agreement.txt` (1,309 chars, 9 chunks): analysis 24.8 s with 2 model calls, 6 findings, 0 quotes rejected, 0 passage mismatches; document questions 2.75 s and 3.03 s; warm-up call 523 ms (model was probably already loaded by an earlier `ollama run`). Escalation and silent-document questions answered without a model call (0.02 s). No outbound connection attempts. |
+| Memory and speed | `ollama ps` during the run: 2.4 GB, **100% GPU**, context 8192, llama.cpp runner. `GET /api/metrics`: 5 calls, average 6,210 ms, 52.09 output tokens/s. A longer PDF is still to be timed. |
+| Output quality (hand review) | Findings accurate and grounded; no concerns raised by the model on the first run, so a `concerns` list and a fixed wording check were added (see `evaluation.md`). Not yet re-run. |
 
 Results will be added here only after they are measured. No numbers in this file are estimates presented as measurements.
 
@@ -47,7 +49,7 @@ Gemma does the document understanding; the backend constrains and checks it:
 
 | Task | Gemma's role | Deterministic checks around it |
 |---|---|---|
-| Clause analysis | Reads each window of clauses and writes findings: category, plain-language explanation, explicit/interpretation/concern, priority, a suggested next step, and the exact quote it relied on | Quote must be found in the source; passage text copied from source; figures checked; legal conclusions removed; enums coerced |
+| Clause analysis | Reads each window of clauses and writes findings (category, plain-language explanation, explicit/interpretation/concern, priority, a suggested next step, the exact quote) and a separate list of concerns (vague, one-sided, no limit, conflict, missing) | Quote must be found in the source; passage text copied from source; figures checked; legal conclusions removed; enums coerced; a fixed wording check adds concerns the model missed, labelled as such |
 | Summary and glossary | Writes a plain summary, document-type guess, and explains legal terms used in the document | Sentences with figures absent from the document removed; glossary terms must occur in the document |
 | Questions | Answers from retrieved passages, classifies the answer type and cites quotes | Answer withheld when no quote verifies; legal-judgment/advice questions escalated regardless of the model |
 

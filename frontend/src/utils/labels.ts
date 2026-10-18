@@ -27,10 +27,11 @@ export const CLASSIFICATION_HELP: Record<Classification, string> = {
   not_established: 'The available text does not establish this.',
 };
 
+// The backend's priority is its risk level for the clause (contract v0.4), always with a reason.
 export const PRIORITY_LABEL: Record<Priority, string> = {
-  high: 'Review first',
-  medium: 'Worth reviewing',
-  low: 'For reference',
+  high: 'High risk',
+  medium: 'Medium risk',
+  low: 'Low risk',
 };
 
 export const EVIDENCE_LABEL: Record<EvidenceStatus, string> = {

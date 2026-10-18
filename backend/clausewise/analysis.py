@@ -22,15 +22,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import citations, safety
+from . import citations, doc_types, safety, wording
 from .chunking import Chunk
 from .document_parser import ExtractedDocument
 from .gemma_engine import Engine, EngineError
-from .retrieval import BM25Index
+from .retrieval import BM25Index, stem
 from .schemas import (
     AnalysisResponse,
     AskResponse,
     DocumentInfo,
+    DocumentTypeInfo,
     Extraction,
     Finding,
     GlossaryEntry,
@@ -43,19 +44,10 @@ from .schemas import (
 
 log = logging.getLogger("clausewise.analysis")
 
+MAX_CONCERNS_PER_WINDOW = 4
 CATEGORIES = ["obligation", "right", "deadline", "payment", "penalty", "termination", "renewal", "ambiguity", "concern", "other"]
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
-TOPICS: list[tuple[str, re.Pattern[str]]] = [
-    ("Termination or ending the agreement", re.compile(r"terminat|cancel|expir|end (?:this|the) (?:agreement|lease|contract|employment)", re.I)),
-    ("Notice period", re.compile(r"\bnotice\b", re.I)),
-    ("Payment terms", re.compile(r"\bpay|\brent\b|\bfees?\b|salary|remuneration|consideration|invoice|compensation", re.I)),
-    ("Penalties, late fees or interest", re.compile(r"penalt|late fee|late charge|\binterest\b|liquidated damages|\bfines?\b|forfeit", re.I)),
-    ("Renewal or extension", re.compile(r"renew|extension|\bextend", re.I)),
-    ("Dispute resolution", re.compile(r"arbitrat|dispute|\bcourts?\b|mediat", re.I)),
-    ("Governing law", re.compile(r"governing law|governed by|laws of|jurisdiction", re.I)),
-    ("Liability or indemnity", re.compile(r"liabilit|liable|indemn", re.I)),
-]
 _SIGNAL = re.compile(
     r"shall|must|agree|terminat|notice|days|months|pay|rent|fee|penalt|interest|deposit|renew|liab|indemn|"
     r"breach|default|waive|forfeit|exclusive|non-compete|confidential|arbitrat|govern|jurisdiction|"
@@ -73,31 +65,52 @@ Rules you must always follow:
 5. Never state that something is legal, illegal, valid, invalid, enforceable or unenforceable, and never tell the reader what they should do. You may suggest asking the other party for clarification or consulting a qualified lawyer.
 6. Write in plain, short sentences that a non-lawyer understands."""
 
-FINDINGS_INSTRUCTIONS = """Read the excerpts and list the points a person signing or receiving this document most needs to understand: obligations, rights, deadlines, payments, penalties, termination conditions, renewal terms, unclear or conflicting wording, and possible concerns.
+DOC_CONTEXT = """Document type: {label}. For this type, pay particular attention to these points, but only where the excerpts actually contain them: {focus}. Do not mention points the excerpts do not cover, and do not describe what such documents usually say."""
+
+FINDINGS_INSTRUCTIONS = """{doc_context}
+
+Read the excerpts and list the points a person signing or receiving this document most needs to understand: obligations, rights, deadlines, payments, penalties, termination conditions, renewal terms, unclear or conflicting wording, and possible concerns.
 
 For each finding:
 - chunk_id: the id of the excerpt the quote comes from
 - category: one of obligation, right, deadline, payment, penalty, termination, renewal, ambiguity, concern, other
 - title: a short label (max 10 words)
-- explanation: 1-3 plain sentences on what the quoted wording says or means
-- classification: "explicit" if the excerpt directly states it; "interpretation" if you explain what the wording appears to mean; "concern" if the wording is vague, one-sided, conflicting or worth checking
+- explanation: 1-3 plain sentences on what the quoted wording says or means, naming the actual parties, amounts and periods from the excerpt. Explain any legal term in everyday words.
+- impact: one sentence on how this could affect the reader in practice, based on the wording (for example what they would have to pay or do, or what they could lose)
+- classification: "explicit" if your explanation only restates what the quote says (most findings are explicit); "interpretation" only if you explain a meaning or effect the quote does not state in words; "concern" if the wording is vague, one-sided, conflicting or worth checking
 - quote: exact text copied from that excerpt
-- priority: high, medium or low for how much it affects the reader; priority_reason: one short sentence why
+- priority: high, medium or low for how much it affects the reader; priority_reason: one short sentence that points at the wording behind the rating (an amount, a deadline, a one-sided right, a missing limit). If the excerpt does not give enough information to judge, use low and say what is unclear.
 - next_step: a short safe suggestion such as a question to ask the other party, or null
 
-Return at most {max_findings} findings, most important first. If an excerpt has nothing important, skip it. If nothing is important, return an empty list."""
+Return at most {max_findings} findings, most important first. If an excerpt has nothing important, skip it. If nothing is important, return an empty list.
 
-SUMMARY_INSTRUCTIONS = """Using only the excerpt from the start of the document and the list of findings already extracted from it, produce:
-- summary: 3 to 5 plain sentences describing what kind of document this is, the parties as they are named in the text, and its main terms. Do not add anything the text does not say.
+Separately, in "concerns", list wording a careful reader would want to question, even if it is also a finding above:
+- kind: "vague" (no clear standard, for example a party decides what is "reasonable"), "one_sided" (one party gets a right the other does not, or can act without notice), "no_limit" (an amount, period or charge with no maximum), "conflict" (two passages disagree), or "missing" (an important detail the clause leaves out)
+- chunk_id and quote: as above, the exact wording that raises the concern
+- title: a short label (max 10 words)
+- issue: 1-2 plain sentences on why the wording may be worth checking, based only on what it says or leaves out
+- question_to_ask: a question the reader could ask the other party
+Do not call anything unfair, illegal or invalid. Return at most {max_concerns} concerns, or an empty list if the wording is clear and balanced."""
+
+SUMMARY_INSTRUCTIONS = """Document type: {label}.
+
+Using only the excerpt from the start of the document and the list of findings already extracted from it, produce:
+- summary: 3 to 5 plain sentences describing what kind of document this is, the parties as they are named in the text, and its main terms with their actual figures and dates. Do not add anything the text does not say, and do not describe what documents of this type usually contain.
 - document_type_guess: a short phrase such as "residential rental agreement", or null if unclear
-- glossary: up to 6 legal or technical terms that appear in the excerpt, each with a one-sentence plain-language meaning as used in this document and an exact quote from the excerpt that contains the term."""
+- glossary: up to 6 legal or technical terms that appear in the excerpt, each with a one-sentence plain-language meaning and an exact quote from the excerpt that contains the term. Base the meaning on how this document uses the term; do not add purposes, conditions or examples the document does not state."""
 
-ASK_INSTRUCTIONS = """Answer the user's question using only the excerpts.
+ASK_INSTRUCTIONS = """Document type: {label}. The excerpts are the parts of this document that best match the question; each has an id and, where known, its section heading.
+
+Answer the user's question using only the excerpts.
+- Be specific: name the clause or section heading the answer comes from, and use the document's own amounts, periods and party names.
+- Explain any legal term in everyday words.
+- Keep the answer to 1-3 sentences unless the question asks for detail or several clauses are involved.
+- Do not answer from general knowledge of what such documents usually say. If the excerpts do not answer the question, say so.
 - answer_type "answered": the excerpts answer it. Give a short plain answer and quote the supporting text.
 - answer_type "not_in_document": the excerpts do not address it. Say the document does not appear to address it. Do not guess or use outside knowledge.
 - answer_type "ambiguous": the wording is unclear or passages conflict. Explain what is unclear and quote the passages.
 - answer_type "out_of_scope": the question is not about this document.
-- classification: "explicit" if the document directly states the answer, "interpretation" if you explain what the wording appears to mean, "concern" if it is unclear or conflicting, "not_established" if the document does not establish it.
+- classification: "explicit" if the document directly states the answer (including when you restate it in plain words), "interpretation" if you explain what the wording appears to mean, "concern" if it is unclear or conflicting, "not_established" if the document does not establish it.
 - quotes: exact text copied from the excerpts with the excerpt id. Empty if nothing supports the answer.
 - jurisdiction_dependent: true if the real-world answer could depend on the law of a country or state.
 Never say whether something is legal, valid or enforceable, and never tell the user what to do."""
@@ -114,6 +127,7 @@ FINDINGS_SCHEMA: dict[str, Any] = {
                     "category": {"type": "string", "enum": CATEGORIES},
                     "title": {"type": "string"},
                     "explanation": {"type": "string"},
+                    "impact": {"type": ["string", "null"]},
                     "classification": {"type": "string", "enum": ["explicit", "interpretation", "concern"]},
                     "quote": {"type": "string"},
                     "priority": {"type": "string", "enum": ["high", "medium", "low"]},
@@ -122,9 +136,24 @@ FINDINGS_SCHEMA: dict[str, Any] = {
                 },
                 "required": ["chunk_id", "category", "title", "explanation", "classification", "quote", "priority", "priority_reason"],
             },
-        }
+        },
+        "concerns": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["vague", "one_sided", "no_limit", "conflict", "missing"]},
+                    "chunk_id": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "title": {"type": "string"},
+                    "issue": {"type": "string"},
+                    "question_to_ask": {"type": ["string", "null"]},
+                },
+                "required": ["kind", "chunk_id", "quote", "title", "issue"],
+            },
+        },
     },
-    "required": ["findings"],
+    "required": ["findings", "concerns"],
 }
 
 SUMMARY_SCHEMA: dict[str, Any] = {
@@ -187,10 +216,32 @@ class DocContext:
     doc: ExtractedDocument
     chunks: list[Chunk]
     index: BM25Index = field(init=False)
+    detection: doc_types.Detection = field(init=False)
+    doc_type: doc_types.DocType = field(init=False)
+    type_source: str = field(init=False, default="detected")
 
     def __post_init__(self) -> None:
         self.index = BM25Index(self.chunks)
         self._by_id = {c.id: c for c in self.chunks}
+        self.detection = doc_types.detect(self.doc.text)
+        self.doc_type = self.detection.type
+
+    def set_type(self, type_id: str | None) -> None:
+        """Use the type the user chose, or go back to the detected one."""
+        if type_id and type_id != "auto":
+            self.doc_type, self.type_source = doc_types.BY_ID[type_id], "user"
+        else:
+            self.doc_type, self.type_source = self.detection.type, "detected"
+
+    def type_info(self) -> DocumentTypeInfo:
+        d = self.detection
+        return DocumentTypeInfo(
+            id=self.doc_type.id, label=self.doc_type.label, source=self.type_source,
+            detected_id=d.type.id, confidence=d.confidence, alternatives=list(d.alternatives),
+        )
+
+    def context_line(self) -> str:
+        return DOC_CONTEXT.format(label=self.doc_type.label, focus=self.doc_type.focus)
 
     @property
     def text(self) -> str:
@@ -296,10 +347,17 @@ def build_finding(ctx: DocContext, raw: dict[str, Any], stats: dict[str, int]) -
             explanation = "The model's explanation of this passage mentioned figures that do not appear in it, so it was withheld. Read the passage directly."
             classification = "interpretation"
             limitations.append("Figures in the generated explanation did not match the cited passage.")
+        elif classification == "interpretation" and restates(explanation, [passage.text]):
+            classification = "explicit"
 
     title = _screen(title, limitations) or "Point to review"
     explanation = _screen(explanation, limitations) or "Read the passage directly."
     next_step = _screen(_str(raw.get("next_step"), 300), limitations) or None
+    impact = _screen(_str(raw.get("impact"), 400), limitations) or None
+    if impact and passage is not None and citations.unsupported_numbers(impact, [passage.text]):
+        impact = None
+    if passage is None:
+        impact = None
     return Finding(
         id="",
         category=category,
@@ -312,7 +370,52 @@ def build_finding(ctx: DocContext, raw: dict[str, Any], stats: dict[str, int]) -
         source_passages=passages,
         limitations=limitations,
         next_step=next_step,
+        impact=impact,
     )
+
+
+def concern_to_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Map an entry of the model's "concerns" list onto the finding shape."""
+    kind = raw.get("kind")
+    return {
+        "chunk_id": raw.get("chunk_id"),
+        "category": "ambiguity" if kind in {"vague", "conflict"} else "concern",
+        "title": raw.get("title"),
+        "explanation": raw.get("issue"),
+        "impact": None,
+        "classification": "concern",
+        "quote": raw.get("quote"),
+        "priority": "medium",
+        "priority_reason": "Wording that may be worth clarifying before relying on it.",
+        "next_step": raw.get("question_to_ask"),
+    }
+
+
+def _overlaps(f: Finding, start: int, end: int) -> bool:
+    return any(p.char_start < end and start < p.char_end for p in f.source_passages)
+
+
+def wording_findings(ctx: DocContext, existing: list[Finding]) -> list[Finding]:
+    """Backstop concerns from deterministic wording rules, where the model raised none on that sentence."""
+    out: list[Finding] = []
+    flagged = [f for f in existing if f.category in {"concern", "ambiguity"} and f.evidence_status == "verified"]
+    for m in wording.find(ctx.text):
+        if any(_overlaps(f, m.start, m.end) for f in flagged + out):
+            continue
+        out.append(Finding(
+            id="",
+            category=m.rule.category,
+            title=m.rule.title,
+            explanation=m.rule.explanation,
+            classification="concern",
+            priority="medium",
+            priority_reason="Wording that may be worth clarifying before relying on it.",
+            evidence_status="verified",
+            source_passages=[ctx.passage(citations.Span(m.start, m.end, "exact"))],
+            limitations=["Flagged by a fixed wording check, not by the model. It points at the wording only and does not judge whether the clause is fair or valid."],
+            next_step=m.rule.next_step,
+        ))
+    return out
 
 
 def _dedupe(findings: list[Finding]) -> list[Finding]:
@@ -369,10 +472,81 @@ def injection_findings(ctx: DocContext) -> list[Finding]:
 
 
 def not_found_topics(ctx: DocContext) -> list[NotFound]:
+    """Topics documents of this type usually address that were not identified anywhere in the extracted text.
+
+    This is "not identified", not "missing": the document may handle the point in other words, or
+    may deliberately leave it out.
+    """
+    t = ctx.doc_type
     note = "Not found in the reviewed text."
+    if t.id != "general":
+        note = f"Not found in the reviewed text. A {t.label.lower()} often addresses this, but not always; it may also be worded in a way this check did not recognise."
     if ctx.doc.extraction_status == "partial":
-        note = "Not found in the reviewed text. Part of the document could not be read, so it may be in the unread part."
-    return [NotFound(topic=topic, note=note) for topic, pattern in TOPICS if not pattern.search(ctx.text)]
+        note += " Part of the document could not be read, so it may be in the unread part."
+    return [NotFound(topic=topic.name, note=note) for topic in t.topics if not topic.pattern.search(ctx.text)]
+
+
+def _is_heading(text: str) -> bool:
+    text = text.strip()
+    return len(text) <= 80 and not any(ch.islower() for ch in text)
+
+
+_RESTATE_STOP = frozenset(
+    "the a an and or of to in on for by with is are be will shall may can this that these those it its "
+    "if as at from any each while also either both their there which who whom what when where than then "
+    "has have had not no".split()
+)
+_NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+                 "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "thirty": "30", "sixty": "60", "ninety": "90"}
+
+
+def _content_stems(text: str) -> set[str]:
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        if w in _RESTATE_STOP or (len(w) < 3 and not w.isdigit()):
+            continue
+        out.add(stem(_NUMBER_WORDS.get(w, w)))
+    return out
+
+
+def restates(explanation: str, passages: list[str], threshold: float = 0.85) -> bool:
+    """True when nearly every content word of the explanation is in the cited text, i.e. a plain restatement."""
+    words = _content_stems(explanation)
+    if len(words) < 3:
+        return False
+    source = set().union(*(_content_stems(p) for p in passages)) if passages else set()
+    return len(words & source) / len(words) >= threshold
+
+
+def _term_pattern(term: str) -> re.Pattern[str] | None:
+    words = re.findall(r"\w+", term)
+    if not words:
+        return None
+    return re.compile(r"\b" + r"\W+".join(map(re.escape, words)) + r"s?\b", re.I)
+
+
+_DOC_TYPES = [
+    (r"\b(?:rental|rent|lease|tenancy)\b", "rental or lease agreement"),
+    (r"\bemployment|employee|employer|appointment letter|offer letter\b", "employment document"),
+    (r"\bnon[- ]disclosure|confidentiality agreement\b", "non-disclosure agreement"),
+    (r"\bloan|borrower|lender\b", "loan agreement"),
+    (r"\bservices? agreement|service provider\b", "service agreement"),
+    (r"\bterms (?:of|and) (?:service|use)|terms and conditions\b", "terms and conditions"),
+    (r"\bnotice\b", "notice"),
+]
+
+
+def guess_document_type(text: str) -> str | None:
+    """Fallback when the model gives no type: the document's own title line, else a keyword guess."""
+    for line in text.splitlines()[:5]:
+        line = line.strip()
+        if 3 < len(line) <= 80 and line.isupper() and re.search(r"AGREEMENT|CONTRACT|LEASE|DEED|NOTICE|LETTER|POLICY|TERMS", line):
+            return line.lower()
+    head = text[:1500]
+    for pattern, label in _DOC_TYPES:
+        if re.search(pattern, head, re.I):
+            return label
+    return None
 
 
 def _remove_unsupported_number_sentences(text: str, source: str) -> tuple[str, bool]:
@@ -415,7 +589,10 @@ class Analyzer:
         failed_windows = 0
         for window in windows:
             try:
-                data = self._call(FINDINGS_INSTRUCTIONS.format(max_findings=s.max_findings_per_window), render_excerpts(window), FINDINGS_SCHEMA)
+                data = self._call(
+                    FINDINGS_INSTRUCTIONS.format(doc_context=ctx.context_line(), max_findings=s.max_findings_per_window, max_concerns=MAX_CONCERNS_PER_WINDOW),
+                    render_excerpts(window), FINDINGS_SCHEMA,
+                )
             except EngineError as exc:
                 if exc.code != "bad_output":
                     raise engine_error_to_analysis(exc) from exc
@@ -423,11 +600,12 @@ class Analyzer:
                 continue
             finally:
                 stats["model_calls"] += 1
-            for raw in (data.get("findings") or [])[: s.max_findings_per_window]:
-                if isinstance(raw, dict):
-                    f = build_finding(ctx, raw, stats)
-                    if f:
-                        findings.append(f)
+            raws = [r for r in (data.get("findings") or [])[: s.max_findings_per_window] if isinstance(r, dict)]
+            raws += [concern_to_raw(r) for r in (data.get("concerns") or [])[:MAX_CONCERNS_PER_WINDOW] if isinstance(r, dict)]
+            for raw in raws:
+                f = build_finding(ctx, raw, stats)
+                if f:
+                    findings.append(f)
         if windows and failed_windows == len(windows):
             raise AnalysisError("analysis_failed", "The local model did not return usable results for this document.", 500)
         if failed_windows:
@@ -438,7 +616,12 @@ class Analyzer:
             pages = sorted({p.page for f in inj for p in f.source_passages if p.page})
             where = f" (page {', '.join(map(str, pages))})" if pages else ""
             warnings.append(Warning(code="instruction_like_text", message=f"The document contains text that reads like instructions to an AI system{where}. It was treated as document content and not followed."))
-        findings = _dedupe(findings) + inj
+        findings = _dedupe(findings)
+        findings = findings + wording_findings(ctx, findings) + inj
+        titles = [f.title.lower() for f in findings]
+        for f in findings:
+            if f.classification == "concern" and titles.count(f.title.lower()) > 1:
+                f.title = f"To clarify: {f.title}"
         for i, f in enumerate(findings, 1):
             f.id = f"f_{i:02d}"
 
@@ -446,6 +629,8 @@ class Analyzer:
         not_found = not_found_topics(ctx)
         if any(n.topic == "Governing law" for n in not_found):
             summary.limitations.append("No governing-law clause was found in the reviewed text. Which country's or state's law applies can change how these terms work.")
+        elif ctx.doc_type.id == "legal_notice":
+            summary.limitations.append("A legal notice states one side's claims and demands. This summary describes what the notice says, not whether the claims are correct.")
         else:
             summary.limitations.append("How these terms apply can depend on the governing law and local rules, which this tool does not assess.")
 
@@ -460,6 +645,7 @@ class Analyzer:
                 char_count=len(doc.text), extraction=Extraction(status=doc.extraction_status, unreadable_pages=doc.unreadable_pages),
             ),
             summary=summary,
+            document_type=ctx.type_info(),
             findings=findings,
             glossary=glossary,
             not_found=not_found,
@@ -484,7 +670,7 @@ class Analyzer:
         finding_lines = "\n".join(f"- {f.title}: {f.explanation}" for f in findings if f.evidence_status == "verified")[:3000]
         excerpts = render_excerpts(head) + "\n\nFindings already extracted:\n" + (finding_lines or "(none)")
         try:
-            data = self._call(SUMMARY_INSTRUCTIONS, excerpts, SUMMARY_SCHEMA, max_tokens=900)
+            data = self._call(SUMMARY_INSTRUCTIONS.format(label=ctx.doc_type.label), excerpts, SUMMARY_SCHEMA, max_tokens=900)
         except EngineError as exc:
             stats["model_calls"] += 1
             if exc.code != "bad_output":
@@ -496,24 +682,31 @@ class Analyzer:
         text, removed = _remove_unsupported_number_sentences(text, ctx.text)
         if removed:
             limitations.append("A summary sentence with figures not found in the document was removed.")
-        doc_type = _str(data.get("document_type_guess"), 80) or None
+        doc_type = _str(data.get("document_type_guess"), 80) or guess_document_type(ctx.text) or ctx.doc_type.label.lower()
 
         glossary: list[GlossaryEntry] = []
         for raw in (data.get("glossary") or [])[:6]:
             if not isinstance(raw, dict):
                 continue
             term = _str(raw.get("term"), 60)
-            if not term or term.lower() not in ctx.text.lower():
+            term_re = _term_pattern(term)
+            hits = [m for m in term_re.finditer(ctx.text)] if term_re else []
+            if not hits:
                 continue
             passage = ctx.verify_quote(_str(raw.get("quote"), 600), None)
-            if passage is None or term.lower() not in passage.text.lower():
-                # Fall back to the first source sentence that contains the term.
-                pos = ctx.text.lower().find(term.lower())
-                s = max(ctx.text.rfind(".", 0, pos), ctx.text.rfind("\n", 0, pos)) + 1
-                e = ctx.text.find(".", pos)
-                e = e + 1 if e != -1 else min(len(ctx.text), pos + 300)
-                while s < pos and ctx.text[s].isspace():
-                    s += 1
+            if passage is None or not term_re.search(passage.text) or _is_heading(passage.text):
+                # Fall back to the first source sentence that uses the term outside a heading;
+                # if the term only appears as a heading, cite the first sentence under it.
+                body = [h for h in hits if not _is_heading(ctx.text[slice(*wording.sentence_span(ctx.text, h.start(), h.end()))])]
+                if body:
+                    s, e = wording.sentence_span(ctx.text, body[0].start(), body[0].end())
+                else:
+                    pos = ctx.text.find("\n", hits[0].end())
+                    while 0 <= pos < len(ctx.text) and ctx.text[pos].isspace():
+                        pos += 1
+                    if pos < 0 or pos >= len(ctx.text):
+                        continue
+                    s, e = wording.sentence_span(ctx.text, pos, pos + 1)
                 passage = ctx.passage(citations.Span(s, min(e, s + 400), "exact"))
             lims: list[str] = []
             explanation = _screen(_str(raw.get("explanation"), 400), lims)
@@ -536,7 +729,7 @@ class Analyzer:
         if hits:
             chunks = sorted((h.chunk for h in hits), key=lambda c: c.char_start)
             try:
-                data = self._call(f"{ASK_INSTRUCTIONS}\n\nQuestion: {question}", render_excerpts(chunks), ASK_SCHEMA, max_tokens=700)
+                data = self._call(f"{ASK_INSTRUCTIONS.format(label=ctx.doc_type.label)}\n\nQuestion: {question}", render_excerpts(chunks), ASK_SCHEMA, max_tokens=700)
             except EngineError as exc:
                 raise engine_error_to_analysis(exc) from exc
             answer_type = data.get("answer_type") if data.get("answer_type") in {"answered", "not_in_document", "ambiguous", "out_of_scope"} else "ambiguous"
@@ -562,6 +755,8 @@ class Analyzer:
                 model_answer = "The cited passages below are relevant, but the generated answer contained figures that do not appear in them, so it was withheld. Read the passages directly."
                 classification = "interpretation"
                 limitations.append("Figures in the generated answer did not match the cited passages.")
+            elif answer_type == "answered" and classification == "interpretation" and restates(model_answer, [p.text for p in passages]):
+                classification = "explicit"
             if answer_type in {"not_in_document", "out_of_scope"}:
                 classification = "not_established"
 

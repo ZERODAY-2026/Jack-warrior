@@ -81,6 +81,33 @@ describe('api client', () => {
     expect(res.processing.quotes_rejected).toBeNull();
   });
 
+  it('accepts a v0.3 response without document_type or impact', async () => {
+    const a = analysis() as unknown as Record<string, unknown>;
+    delete a.document_type;
+    for (const f of a.findings as Record<string, unknown>[]) delete f.impact;
+    mockBackend({ 'POST /api/documents': () => json(a) });
+    const res = await api.analyze(textFile());
+    expect(res.document_type).toBeNull();
+    expect(res.findings[0]!.impact).toBeNull();
+  });
+
+  it('rejects an unknown type confidence instead of guessing', async () => {
+    const a = analysis() as unknown as { document_type: Record<string, unknown> };
+    a.document_type.confidence = 'certain';
+    mockBackend({ 'POST /api/documents': () => json(a) });
+    await expect(api.analyze(textFile())).rejects.toMatchObject({ code: 'malformed_response' });
+  });
+
+  it('re-analyses with the chosen type and lists document types', async () => {
+    const { calls } = mockBackend({
+      'POST /api/documents/d1/reanalyse': () => json(analysis('d1')),
+      'GET /api/document-types': () => json([{ id: 'nda', label: 'Non-disclosure agreement' }]),
+    });
+    await api.reanalyse('d1', 'nda');
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ document_type: 'nda' });
+    expect(await api.documentTypes()).toEqual([{ id: 'nda', label: 'Non-disclosure agreement' }]);
+  });
+
   it('encodes document ids in paths', async () => {
     const { calls } = mockBackend({
       'DELETE /api/documents/a%2Fb': () => json({ deleted: true, removed: [] }),

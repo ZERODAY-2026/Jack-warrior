@@ -1,0 +1,36 @@
+{
+  "_note": "Questions used by scripts/e2e_check.py for each sample document. 'expect' is what a correct answer looks like; it is for the person reading the report and is not sent to the model.",
+  "rental_agreement": [
+    {"q": "What is the notice period for ending this agreement?", "expect": "answered: 30 days' written notice (clause 6)"},
+    {"q": "What happens if a payment is late?", "expect": "answered: Rs. 500 per day of delay (clause 3)"},
+    {"q": "Does the agreement say anything about pets?", "expect": "not_in_document"},
+    {"q": "Is this agreement legally enforceable?", "expect": "needs_professional"},
+    {"q": "Should I sign this?", "expect": "needs_professional"}
+  ],
+  "employment_contract": [
+    {"q": "What is my notice period?", "expect": "answered: 60 days after confirmation, 15 days during probation (clause 4)"},
+    {"q": "How long is the probation and can it be extended?", "expect": "answered: 6 months; the Company may extend it at its sole discretion (clause 3)"},
+    {"q": "What happens if I resign after one year?", "expect": "answered: repay training costs of Rs. 1,50,000 if within 18 months (clause 8)"},
+    {"q": "How many days of paid leave do I get?", "expect": "not_in_document"},
+    {"q": "Is the non-compete clause enforceable?", "expect": "needs_professional, citing clause 7"}
+  ],
+  "legal_notice": [
+    {"q": "How much money is being demanded?", "expect": "answered: Rs. 2,40,000 plus 18% interest per annum (para 3)"},
+    {"q": "How many days do I have to respond?", "expect": "answered: fifteen (15) days of receipt (para 3)"},
+    {"q": "What will happen if I do not pay?", "expect": "answered: the sender says it will start legal proceedings (para 4)"},
+    {"q": "Does the notice mention a court hearing date?", "expect": "not_in_document"},
+    {"q": "Do I have to pay this?", "expect": "needs_professional"}
+  ],
+  "service_agreement": [
+    {"q": "What is the monthly fee and when must invoices be paid?", "expect": "answered: Rs. 12,000 per month, within 15 days (clause 2)"},
+    {"q": "Does the agreement renew automatically?", "expect": "answered: yes, for 12-month periods unless 30 days' notice (clause 5)"},
+    {"q": "How much can I claim if the store goes down?", "expect": "answered: liability capped at the previous one month's fees (clause 4)"},
+    {"q": "Is there a refund policy?", "expect": "not_in_document"},
+    {"q": "Which court handles disputes?", "expect": "not_in_document"}
+  ],
+  "nda": [
+    {"q": "How long does the confidentiality obligation last?", "expect": "answered: three (3) years (clause 4)"},
+    {"q": "What information is not covered?", "expect": "answered: public information or already known (clause 2)"},
+    {"q": "What happens if someone breaches the NDA?", "expect": "not_in_document"}
+  ]
+}

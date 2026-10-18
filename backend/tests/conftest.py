@@ -66,3 +66,26 @@ def make_pdf(pages: list[str], encrypt: str | None = None) -> bytes:
 
 def upload(client: TestClient, name: str, data: bytes, content_type: str = "text/plain"):
     return client.post("/api/documents", files={"file": (name, data, content_type)})
+
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def make_docx(body_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:
+    """A minimal .docx built in memory: word/document.xml with the given <w:body> content."""
+    import zipfile
+
+    doc = f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{_W_NS}"><w:body>{body_xml}</w:body></w:document>'
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        zf.writestr("word/document.xml", doc)
+        for name, xml in (extra_parts or {}).items():
+            zf.writestr(name, xml)
+    return buf.getvalue()
+
+
+def docx_paragraphs(*paragraphs: str) -> str:
+    from xml.sax.saxutils import escape
+
+    return "".join(f"<w:p><w:r><w:t xml:space=\"preserve\">{escape(p)}</w:t></w:r></w:p>" for p in paragraphs)

@@ -1,39 +1,75 @@
+/*
+ * Design tokens. A deep navy sidebar frames a warm off-white workspace; muted teal is the
+ * single accent. Status colours keep at least 4.5:1 contrast on their soft backgrounds.
+ */
 :root {
-  --color-brand: #183b4e;
-  --color-brand-hover: #24566b;
-  --color-brand-soft: #e6eff3;
-  --color-page: #f5f7f8;
+  /* Workspace */
+  --color-page: #f6f4ef;
   --color-surface: #ffffff;
-  --color-surface-2: #f9fbfb;
-  --color-text: #172b36;
-  --color-muted: #566a75;
-  --color-border: #dce4e8;
-  --color-border-strong: #c3d0d6;
-  --color-focus: #2f7fa0;
+  --color-surface-2: #faf9f6;
+  --color-surface-3: #f1eee7;
+  --color-text: #14212b;
+  --color-muted: #5b6871;
+  --color-subtle: #7b868d;
+  --color-border: #e8e4db;
+  --color-border-strong: #d5cfc2;
 
-  --color-success: #23704c;
-  --color-success-soft: #e7f3ec;
-  --color-warning: #8a5a12;
-  --color-warning-soft: #fbf1df;
-  --color-danger: #a33c3c;
+  /* Accent (muted teal) */
+  --color-brand: #1d6b74;
+  --color-brand-hover: #175961;
+  --color-brand-soft: #e4f0ef;
+  --color-brand-tint: #f0f7f6;
+  --color-focus: #2b8c95;
+
+  /* Sidebar */
+  --color-side: #0f1d27;
+  --color-side-2: #162733;
+  --color-side-text: #d3dde3;
+  --color-side-muted: #8597a3;
+  --color-side-border: rgb(255 255 255 / 0.07);
+  --color-side-active: rgb(255 255 255 / 0.09);
+  --color-side-accent: #5cc0b5;
+
+  /* Status */
+  --color-success: #1f6b47;
+  --color-success-soft: #e6f2eb;
+  --color-success-line: #b9dbc8;
+  --color-warning: #85540c;
+  --color-warning-soft: #fbf1de;
+  --color-warning-line: #ead1a2;
+  --color-danger: #a1373a;
   --color-danger-soft: #fbeaea;
-  --color-info: #245f7a;
+  --color-danger-line: #e8c1c1;
+  --color-info: #225c77;
   --color-info-soft: #e7f1f6;
-  --color-interp: #5a4a8a;
-  --color-interp-soft: #efecf8;
-  --color-quote-bg: #fbfaf6;
-  --color-quote-rule: #b9a66b;
+  --color-info-line: #bdd6e2;
+  --color-interp: #59488c;
+  --color-interp-soft: #f0edf9;
+  --color-interp-line: #d7cfee;
+  --color-neutral: #46545c;
+  --color-neutral-soft: #eef0f1;
+  --color-neutral-line: #d6dbde;
+
+  /* Source quotes */
+  --color-quote-bg: #fbf9f3;
+  --color-quote-line: #ebe3cc;
+  --color-quote-rule: #b59f5f;
   --color-mark: #fde9a8;
 
-  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
-  --radius-card: 14px;
-  --radius-control: 9px;
+  --radius-card: 16px;
+  --radius-inner: 12px;
+  --radius-control: 10px;
   --radius-pill: 999px;
-  --shadow-card: 0 1px 2px rgb(23 43 54 / 0.04), 0 2px 8px rgb(23 43 54 / 0.04);
-  --shadow-raised: 0 8px 28px rgb(23 43 54 / 0.12);
+  --shadow-card: 0 1px 2px rgb(20 33 43 / 0.04), 0 4px 16px -8px rgb(20 33 43 / 0.08);
+  --shadow-hover: 0 2px 4px rgb(20 33 43 / 0.05), 0 12px 28px -12px rgb(20 33 43 / 0.18);
+  --shadow-raised: 0 18px 48px -12px rgb(15 29 39 / 0.28);
+
+  --sidebar-width: 264px;
+  --topbar-height: 60px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -43,4 +79,6 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-10: 40px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }

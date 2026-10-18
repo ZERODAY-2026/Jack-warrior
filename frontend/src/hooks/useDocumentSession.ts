@@ -1,7 +1,7 @@
 import { useCallback, useReducer, useRef } from 'react';
 import { api, ApiError } from '../services/api';
 import type { AnalysisResult, AskResponse } from '../types/api';
-import { checkFile, DEFAULT_RULES, type FileRules } from '../utils/validateFile';
+import { checkFile, checkText, DEFAULT_RULES, type FileRules } from '../utils/validateFile';
 
 export interface UiError {
   code: string;
@@ -18,37 +18,59 @@ export interface QaEntry {
 
 export type Phase = 'empty' | 'selected' | 'analyzing' | 'ready' | 'failed';
 
+export interface PastedText {
+  text: string;
+  title: string | null;
+}
+
+/** The display name for whatever is being analysed. */
+export function sourceName(s: { file: File | null; pasted: PastedText | null }): string {
+  return s.file?.name ?? s.pasted?.title ?? 'Pasted text';
+}
+
 export interface SessionState {
   phase: Phase;
   file: File | null;
+  pasted: PastedText | null;
   fileError: string | null;
+  textError: string | null;
   analysis: AnalysisResult | null;
   error: UiError | null;
   startedAt: number | null;
   qa: QaEntry[];
   notice: { tone: 'info' | 'warning'; text: string } | null;
+  /** Set while a loaded document is being analysed again as another type. */
+  reanalysis: { startedAt: number; typeLabel: string } | null;
 }
 
 const initial: SessionState = {
   phase: 'empty',
   file: null,
+  pasted: null,
   fileError: null,
+  textError: null,
   analysis: null,
   error: null,
   startedAt: null,
   qa: [],
   notice: null,
+  reanalysis: null,
 };
 
 type Action =
   | { type: 'select'; file: File }
+  | { type: 'select_text'; pasted: PastedText }
   | { type: 'reject'; message: string }
+  | { type: 'reject_text'; message: string }
   | { type: 'start'; at: number }
   | { type: 'success'; analysis: AnalysisResult }
   | { type: 'fail'; error: UiError }
   | { type: 'ask'; entry: QaEntry }
   | { type: 'answer'; id: string; response: AskResponse }
   | { type: 'answer_fail'; id: string; error: UiError }
+  | { type: 'reanalyse_start'; at: number; typeLabel: string }
+  | { type: 'reanalyse_done'; analysis: AnalysisResult }
+  | { type: 'reanalyse_end'; notice: SessionState['notice'] }
   | { type: 'reset'; notice: SessionState['notice'] }
   | { type: 'notice'; notice: SessionState['notice'] };
 
@@ -56,8 +78,12 @@ function reducer(state: SessionState, a: Action): SessionState {
   switch (a.type) {
     case 'select':
       return { ...initial, phase: 'selected', file: a.file, notice: state.notice };
+    case 'select_text':
+      return { ...initial, phase: 'selected', pasted: a.pasted, notice: state.notice };
     case 'reject':
       return { ...initial, fileError: a.message, notice: null };
+    case 'reject_text':
+      return { ...initial, textError: a.message, notice: null };
     case 'start':
       return { ...state, phase: 'analyzing', error: null, startedAt: a.at, notice: null };
     case 'success':
@@ -76,6 +102,13 @@ function reducer(state: SessionState, a: Action): SessionState {
         ...state,
         qa: state.qa.map((q) => (q.id === a.id ? { ...q, status: 'error', error: a.error } : q)),
       };
+    case 'reanalyse_start':
+      return { ...state, reanalysis: { startedAt: a.at, typeLabel: a.typeLabel }, notice: null };
+    case 'reanalyse_done':
+      // Same document, new reading of it: questions already asked stay valid.
+      return { ...state, analysis: a.analysis, reanalysis: null };
+    case 'reanalyse_end':
+      return { ...state, reanalysis: null, notice: a.notice };
     case 'reset':
       return { ...initial, notice: a.notice };
     case 'notice':
@@ -156,15 +189,16 @@ export function useDocumentSession(rules: FileRules = DEFAULT_RULES) {
     [discard, rules],
   );
 
-  const analyze = useCallback(async () => {
-    const { file, phase } = stateRef.current;
-    if (!file || phase === 'analyzing') return; // guards double submission
+  const run = useCallback(async (source: { file: File } | { pasted: PastedText }, documentType: string) => {
     const mySession = ++session.current;
     const controller = new AbortController();
     inflight.current = controller;
     dispatch({ type: 'start', at: Date.now() });
     try {
-      const analysis = await api.analyze(file, controller.signal);
+      const analysis =
+        'file' in source
+          ? await api.analyze(source.file, documentType, controller.signal)
+          : await api.analyzeText(source.pasted.text, source.pasted.title, documentType, controller.signal);
       if (session.current !== mySession) {
         // The user moved on while the backend worked; don't keep its copy around.
         void api.deleteDocument(analysis.document_id).catch(() => undefined);
@@ -179,11 +213,72 @@ export function useDocumentSession(rules: FileRules = DEFAULT_RULES) {
     }
   }, []);
 
+  const analyze = useCallback(async (documentType = 'auto') => {
+    const { file, pasted, phase } = stateRef.current;
+    if (phase === 'analyzing') return; // guards double submission
+    if (file) await run({ file }, documentType);
+    else if (pasted) await run({ pasted }, documentType);
+  }, [run]);
+
+  /** Validates pasted text, replaces any current document, and starts analysis. */
+  const submitText = useCallback(
+    async (text: string, title: string, documentType = 'auto') => {
+      if (stateRef.current.phase === 'analyzing') return;
+      const check = checkText(text, rules);
+      if (!check.ok) {
+        dispatch({ type: 'reject_text', message: check.message });
+        return;
+      }
+      const hadDocument = stateRef.current.analysis !== null;
+      const notice = hadDocument ? await discard() : null;
+      const pasted: PastedText = { text, title: title.trim() || null };
+      dispatch({ type: 'reset', notice });
+      dispatch({ type: 'select_text', pasted });
+      await run({ pasted }, documentType);
+    },
+    [discard, rules, run],
+  );
+
+  /**
+   * Analyses the loaded document again as another type. The earlier results stay in
+   * state and come back if this fails or is cancelled.
+   */
+  const reanalyse = useCallback(async (documentType: string, typeLabel: string) => {
+    const { analysis, reanalysis } = stateRef.current;
+    if (!analysis || reanalysis) return;
+    const mySession = session.current;
+    const controller = new AbortController();
+    inflight.current = controller;
+    dispatch({ type: 'reanalyse_start', at: Date.now(), typeLabel });
+    try {
+      const next = await api.reanalyse(analysis.document_id, documentType, controller.signal);
+      if (session.current !== mySession) return;
+      dispatch({ type: 'reanalyse_done', analysis: next });
+    } catch (e) {
+      if (session.current !== mySession) return;
+      const err = toUiError(e);
+      dispatch({
+        type: 'reanalyse_end',
+        notice:
+          err.code === 'aborted'
+            ? { tone: 'info', text: 'Re-analysis cancelled. The earlier results are shown.' }
+            : { tone: 'warning', text: `Could not analyse it again: ${err.message} The earlier results are still shown.` },
+      });
+    } finally {
+      if (inflight.current === controller) inflight.current = null;
+    }
+  }, []);
+
+  const cancelReanalyse = useCallback(() => {
+    inflight.current?.abort();
+  }, []);
+
   const cancel = useCallback(async () => {
-    const file = stateRef.current.file;
+    const { file, pasted } = stateRef.current;
     const notice = await discard();
     dispatch({ type: 'reset', notice });
     if (file) dispatch({ type: 'select', file });
+    else if (pasted) dispatch({ type: 'select_text', pasted });
   }, [discard]);
 
   const ask = useCallback(async (question: string) => {
@@ -214,5 +309,5 @@ export function useDocumentSession(rules: FileRules = DEFAULT_RULES) {
 
   const dismissNotice = useCallback(() => dispatch({ type: 'notice', notice: null }), []);
 
-  return { state, selectFile, analyze, cancel, ask, reset, dismissNotice };
+  return { state, selectFile, submitText, analyze, cancel, reanalyse, cancelReanalyse, ask, reset, dismissNotice };
 }

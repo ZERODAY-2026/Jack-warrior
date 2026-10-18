@@ -36,6 +36,7 @@ class Finding(BaseModel):
     source_passages: list[Passage]
     limitations: list[str] = Field(default_factory=list)
     next_step: str | None = None
+    impact: str | None = None
 
 
 class GlossaryEntry(BaseModel):
@@ -51,7 +52,7 @@ class Extraction(BaseModel):
 
 class DocumentInfo(BaseModel):
     filename: str
-    file_type: Literal["pdf", "txt"]
+    file_type: Literal["pdf", "docx", "txt"]
     size_bytes: int
     page_count: int | None
     char_count: int
@@ -62,6 +63,20 @@ class Summary(BaseModel):
     text: str
     document_type_guess: str | None
     limitations: list[str]
+
+
+class DocumentTypeInfo(BaseModel):
+    id: str
+    label: str
+    source: Literal["detected", "user"]
+    detected_id: str
+    confidence: Literal["high", "low"]
+    alternatives: list[str]
+
+
+class DocumentTypeOption(BaseModel):
+    id: str
+    label: str
 
 
 class NotFound(BaseModel):
@@ -88,6 +103,7 @@ class AnalysisResponse(BaseModel):
     document_id: str
     document: DocumentInfo
     summary: Summary
+    document_type: DocumentTypeInfo
     findings: list[Finding]
     glossary: list[GlossaryEntry]
     not_found: list[NotFound]
@@ -105,6 +121,16 @@ class PageOut(BaseModel):
 class DocumentText(BaseModel):
     document_id: str
     pages: list[PageOut]
+
+
+class PastedText(BaseModel):
+    text: str
+    title: str | None = None
+    document_type: str | None = None  # a type id, or "auto"/None to detect
+
+
+class Reanalyse(BaseModel):
+    document_type: str | None = None
 
 
 class AskRequest(BaseModel):
@@ -140,6 +166,7 @@ class Limits(BaseModel):
     max_file_bytes: int
     max_pages: int
     accepted_extensions: list[str]
+    accepts_pasted_text: bool = False
     max_question_chars: int
     ocr_supported: bool
 

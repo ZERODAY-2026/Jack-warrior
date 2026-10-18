@@ -1,0 +1,18 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Non-Disclosure Agreement is made on 3 August 2026 between Kite Robotics Private Limited and Orbit Labs LLP (each a "Party").
+
+1. CONFIDENTIAL INFORMATION
+"Confidential Information" means any business, technical or financial information disclosed by one Party to the other and marked as confidential.
+
+2. EXCLUSIONS
+Confidential Information does not include information that is publicly available or was already known to the receiving Party.
+
+3. OBLIGATIONS
+The receiving Party shall use Confidential Information only to evaluate a possible business partnership and shall not disclose it to any third party.
+
+4. DURATION
+The obligations under this agreement continue for three (3) years from the date of this agreement.
+
+5. RETURN OF INFORMATION
+On request, the receiving Party shall return or destroy all Confidential Information.

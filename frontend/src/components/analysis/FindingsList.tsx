@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Classification, Finding, FindingCategory, Priority } from '../../types/api';
 import { CATEGORY_LABEL, CLASSIFICATION_LABEL, PRIORITY_LABEL } from '../../utils/labels';
 import { FindingCard } from './FindingCard';
+import { Reveal } from '../motion/Reveal';
 
 const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
@@ -63,9 +64,9 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
           </select>
         </label>
         <label>
-          <span>Priority</span>
+          <span>Risk level</span>
           <select value={priority} onChange={(e) => setPriority(e.target.value as Priority | 'all')}>
-            <option value="all">Any priority</option>
+            <option value="all">Any risk level</option>
             {(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => (
               <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
             ))}
@@ -86,16 +87,16 @@ export function FindingsList({ findings, selectedId, onSelect }: Props) {
         )}
       </div>
       <p className="muted findings__count" aria-live="polite">
-        Showing {shown.length} of {findings.length} findings, most important first
+        Showing {shown.length} of {findings.length} findings, highest risk first
       </p>
       {shown.length === 0 ? (
         <p className="empty-state">No findings match these filters.</p>
       ) : (
         <ul className="findings__list">
-          {shown.map((f) => (
-            <li key={f.id}>
+          {shown.map((f, i) => (
+            <Reveal as="li" key={f.id} index={i}>
               <FindingCard finding={f} selected={f.id === selectedId} onSelect={onSelect} />
-            </li>
+            </Reveal>
           ))}
         </ul>
       )}

@@ -2,7 +2,7 @@ import pytest
 
 from clausewise.document_parser import DocumentError, parse_document, safe_filename
 
-from conftest import fixture_bytes, make_pdf
+from conftest import docx_paragraphs, fixture_bytes, make_docx, make_pdf
 
 
 def parse(data, name="doc.txt", max_pages=80, max_chars=400_000):
@@ -45,7 +45,11 @@ def test_pdf_with_blank_page_is_partial():
         (b"   \n\n  ", "x.txt", "empty_document"),
         (b"%PDF-1.7\n garbage garbage", "x.pdf", "corrupt_file"),
         (b"not a pdf at all", "x.pdf", "corrupt_file"),
-        (b"PK\x03\x04\x00\x00binary", "x.docx", "unsupported_type"),
+        (b"PK\x03\x04\x00\x00binary", "x.docx", "corrupt_file"),
+        (b"not a zip", "x.docx", "corrupt_file"),
+        (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64, "x.docx", "encrypted_document"),
+        (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64, "old.doc", "unsupported_type"),
+        (b"PK\x03\x04\x00\x00binary", "x.xlsx", "unsupported_type"),
         (b"\x00\x01\x02binary", "x.txt", "unsupported_type"),
     ],
 )
@@ -82,3 +86,43 @@ def test_safe_filename_strips_paths():
     assert safe_filename("../../etc/passwd") == "passwd"
     assert safe_filename("C:\\Users\\me\\lease.pdf") == "lease.pdf"
     assert safe_filename(None) == "document"
+
+
+W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+
+def test_docx_paragraphs_tables_and_tracked_changes():
+    body = (
+        docx_paragraphs("EMPLOYMENT AGREEMENT", "1. NOTICE", "Either party may end this agreement with 60 days' notice.")
+        + "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Salary</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p><w:r><w:t>Rs. 40,000 per month</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+        "<w:p><w:r><w:t>Leave is </w:t></w:r><w:del><w:r><w:delText>10</w:delText></w:r></w:del>"
+        "<w:ins><w:r><w:t>12</w:t></w:r></w:ins><w:r><w:tab/><w:t>days.</w:t></w:r></w:p>"
+    )
+    doc = parse(make_docx(body), "contract.docx")
+    assert doc.file_type == "docx" and doc.page_count is None and doc.extraction_status == "complete"
+    assert doc.text.splitlines() == [
+        "EMPLOYMENT AGREEMENT", "1. NOTICE", "Either party may end this agreement with 60 days' notice.",
+        "Salary | Rs. 40,000 per month", "Leave is 12\tdays.",
+    ]
+
+
+def test_docx_with_text_in_footnotes_warns_and_empty_docx_fails():
+    footnotes = f'<w:footnotes {W}><w:footnote><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:footnote></w:footnotes>'
+    doc = parse(make_docx(docx_paragraphs("Main text of the agreement."), {"word/footnotes.xml": footnotes}), "a.docx")
+    assert [c for c, _ in doc.warnings] == ["docx_body_only"] and doc.extraction_status == "partial"
+    with pytest.raises(DocumentError) as err:
+        parse(make_docx("<w:p/>"), "blank.docx")
+    assert err.value.code == "empty_document"
+
+
+def test_docx_with_entity_declarations_is_refused():
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><x>&a;</x>')
+    with pytest.raises(DocumentError) as err:
+        parse(buf.getvalue(), "bomb.docx")
+    assert err.value.code == "corrupt_file"

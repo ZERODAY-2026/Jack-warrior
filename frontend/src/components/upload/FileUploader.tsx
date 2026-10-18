@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react';
 import { Upload } from 'lucide-react';
-import { formatBytes } from '../../utils/validateFile';
+import { describeTypes, formatBytes } from '../../utils/validateFile';
 
 interface Props {
   onFile: (file: File) => void;
@@ -14,7 +14,7 @@ interface Props {
 export function FileUploader({ onFile, acceptedExtensions, maxBytes, ocrSupported, disabled, error }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const types = acceptedExtensions.map((e) => e.slice(1).toUpperCase()).join(' or ');
+  const types = describeTypes(acceptedExtensions);
 
   const take = (files: FileList | null) => {
     if (disabled || !files || files.length === 0) return;

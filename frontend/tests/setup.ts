@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+import { MotionGlobalConfig } from 'motion/react';
+
+// Animations finish instantly in tests so assertions never race a transition.
+MotionGlobalConfig.skipAnimations = true;
 
 afterEach(() => {
   cleanup();

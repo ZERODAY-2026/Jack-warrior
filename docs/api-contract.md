@@ -1,6 +1,6 @@
 # API contract (frontend ⇄ local backend)
 
-**Status: v0.2, agreed by the backend (2026-10-18).** v0.2 only adds fields to v0.1 (marked *added in v0.2*); nothing was renamed or removed. The backend's Pydantic models in `backend/clausewise/schemas.py` are the executable version and are tested; `GET /api/openapi.json` serves the generated schema.
+**Status: v0.4, backend (2026-10-18).** v0.4 adds document types (detected, or chosen by the user), `impact` on findings, and a re-analyse route (marked *added in v0.4*). v0.2 only added fields to v0.1 (marked *added in v0.2*). v0.3 adds Word `.docx` uploads and pasted text (marked *added in v0.3*); nothing was renamed or removed. The backend's Pydantic models in `backend/clausewise/schemas.py` are the executable version and are tested; `GET /api/openapi.json` serves the generated schema.
 The backend owns this contract. Any field or path change should be made here first and announced to the other teammate. The frontend's TypeScript mirror lives in `frontend/src/types/api.ts`.
 
 ## Transport
@@ -54,7 +54,8 @@ Non-2xx responses use one shape:
   "limits": {
     "max_file_bytes": 10485760,
     "max_pages": 80,
-    "accepted_extensions": [".pdf", ".txt"],
+    "accepted_extensions": [".pdf", ".docx", ".txt"],
+    "accepts_pasted_text": true,
     "max_question_chars": 500,
     "ocr_supported": false
   },
@@ -77,7 +78,20 @@ Non-2xx responses use one shape:
 
 ## `POST /api/documents` — upload and analyse
 
-Request: `multipart/form-data` with one field `file`.
+Request: `multipart/form-data` with one field `file`: a PDF, a Word `.docx` (*added in v0.3*) or a TXT file. Optional field `document_type` (*added in v0.4*): a type id from `GET /api/document-types`, or `auto` / absent to detect it.
+
+Response (*added in v0.4*): `document_type` object:
+
+```json
+"document_type": {"id": "employment", "label": "Employment contract or offer letter", "source": "detected",
+                  "detected_id": "employment", "confidence": "high", "alternatives": []}
+```
+
+`source` is `detected` or `user`. `confidence` is `high` or `low`; when `low`, the UI should invite the user to confirm or pick the type. `alternatives` are other plausible type ids. The type changes what the model is asked to look for and which topics are reported in `not_found`; it never adds content that is not in the document.
+
+- `document.file_type` is `"pdf"`, `"docx"` (*added in v0.3*) or `"txt"`. For `docx`, `page_count` is `null` and passages have `page: null` (Word files have no fixed pages).
+- DOCX: the main text is read in order, with paragraphs and table rows (cells joined by ` | `); deleted tracked changes are skipped. If headers, footers, footnotes or comments contain text, a `docx_body_only` warning says they were not analysed.
+- New error codes (*added in v0.3*): `encrypted_document` (400, password-protected Word file). Old binary `.doc` files get `unsupported_type` with a message asking for `.docx` or PDF.
 
 Response `200`:
 
@@ -114,7 +128,7 @@ Response `200`:
 ```
 
 - `extraction.status`: `complete` | `partial`. `unreadable_pages` lists 1-based pages with no text.
-- `not_found`: topics the backend looked for and did not find. Wording must stay "not found in the reviewed text", never "the contract lacks".
+- `not_found`: topics the backend looked for and did not find. Wording must stay "not found in the reviewed text", never "the contract lacks". *Changed in v0.4:* the topics depend on `document_type` (a legal notice is not checked for a governing-law clause; an NDA is checked for exclusions), and the note says the point may be worded differently or deliberately left out.
 - `warnings`: non-fatal issues. A response with warnings is a partial success. Codes the backend emits: `pages_truncated`, `text_truncated`, `unreadable_pages`, `long_document_partially_analysed`, `partial_analysis`, `instruction_like_text` (prompt-injection-like text found; treated as content and also reported as a `concern` finding).
 - `glossary` (*added in v0.2*): legal terms that appear in the document, with a plain-language explanation. A term is kept only if it occurs in the document text, and its passage is copied from the source.
 - `processing` (*added in v0.2*: `runtime`, `model_calls`, `chunks_total`, `chunks_analysed`, `quotes_rejected`). `quotes_rejected` counts model-proposed quotes that were not found in the document and were therefore discarded.
@@ -149,6 +163,8 @@ Response `200`:
   - `unverified`: a passage could not be matched; the UI shows it as unverified. **The v0.2 backend never sends this**: an unmatched quote is discarded and the finding gets `none`, so model-written text is never displayed as a quotation. The value stays in the enum for compatibility.
   - `none`: no supporting passage. The UI shows "No supporting passage found" and never fills it in. The backend also sets `classification: "not_established"`, `priority: "low"` and explains why in `limitations`.
 - `next_step`: optional safe suggestion, e.g. "Ask the landlord to clarify" or "Consult a qualified lawyer".
+- `impact` (*added in v0.4*): optional one sentence on how the clause could affect the reader in practice. `null` when the model gave none, when the quote was not verified, or when it mentioned figures that are not in the passage.
+- `priority` is the risk level; `priority_reason` points at the wording behind it. The model is told to use `low` and say what is unclear when the excerpt does not give enough to judge.
 
 ### Passage
 
@@ -167,6 +183,20 @@ Response `200`:
 - `page` is 1-based, `null` for TXT. `section` is the most recent heading the chunker detected before the passage (e.g. `6. TERMINATION`, `Clause 12`), or `null`. Heading detection is heuristic.
 - `char_start`/`char_end` are always integers from the backend.
 - `char_start`/`char_end` are offsets into the full extracted text (same coordinate system as `/text`).
+
+## `POST /api/documents/text` — analyse pasted text (*added in v0.3*)
+
+Request: `application/json` `{"text": "…", "title": "optional display name", "document_type": "optional type id or auto"}`. Same limits as a file (`max_file_bytes` of UTF-8, then `max_chars`).
+
+Response: identical to `POST /api/documents`, with `document.file_type: "txt"`, `document.filename` = the title or `"Pasted text"`, and `page_count: null`. Errors: `empty_document` (400), `file_too_large` (413), `invalid_request` (400, no `text`). The text is held in memory only, like an upload, and is removed by `DELETE`.
+
+## `GET /api/document-types` (*added in v0.4*)
+
+`[{"id": "rental", "label": "Rental or lease agreement"}, …, {"id": "general", "label": "Other legal document"}]`. Ids: `rental`, `employment`, `legal_notice`, `nda`, `freelance`, `service`, `vendor`, `partnership`, `terms`, `general`.
+
+## `POST /api/documents/{document_id}/reanalyse` (*added in v0.4*)
+
+Request: `{"document_type": "nda"}` (or `"auto"` to go back to the detected type). Runs the analysis again on the already-loaded document, keeps the same `document_id`, and returns a full analysis response. Error `invalid_document_type` (400) for an unknown id; `document_not_found` (404).
 
 ## `GET /api/documents/{document_id}/text`
 

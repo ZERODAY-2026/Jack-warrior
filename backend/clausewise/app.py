@@ -6,18 +6,18 @@ import logging
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartParser
 
-from . import __version__, privacy
+from . import __version__, doc_types, privacy
 from .analysis import AnalysisError, Analyzer, DocContext
 from .chunking import chunk_document
 from .config import Settings
-from .document_parser import DocumentError, parse_document
+from .document_parser import DocumentError, parse_document, safe_filename, text_document
 from .gemma_engine import Engine, create_engine
 from .schemas import (
     AnalysisResponse,
@@ -29,6 +29,9 @@ from .schemas import (
     Limits,
     ModelInfo,
     PageOut,
+    PastedText,
+    Reanalyse,
+    DocumentTypeOption,
     PrivacyInfo,
 )
 from .store import REMOVED_ITEMS, DocumentRecord, DocumentStore
@@ -113,7 +116,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
             status="ok" if model.state == "ready" else "degraded",
             version=__version__,
             model=model,
-            limits=Limits(max_file_bytes=settings.max_file_bytes, max_pages=settings.max_pages, accepted_extensions=[".pdf", ".txt"],
+            limits=Limits(max_file_bytes=settings.max_file_bytes, max_pages=settings.max_pages, accepted_extensions=[".pdf", ".docx", ".txt"], accepts_pasted_text=True,
                           max_question_chars=settings.max_question_chars, ocr_supported=False),
             privacy=PrivacyInfo(
                 bind_host=settings.host, telemetry_enabled=False, outbound_network_required=False,
@@ -129,7 +132,8 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         return {"model": engine.metrics.as_dict(), "documents_loaded": len(store), "blocked_outbound_attempts": privacy.blocked_attempts()}
 
     @app.post("/api/documents", response_model=AnalysisResponse)
-    def analyse_document(request: Request, file: UploadFile = File(...)) -> AnalysisResponse:
+    def analyse_document(request: Request, file: UploadFile = File(...), document_type: str | None = Form(None)) -> AnalysisResponse:
+        type_id = check_type(document_type)
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > settings.max_file_bytes + 64 * 1024:
             raise APIError("file_too_large", f"The file is larger than the {settings.max_file_bytes // (1024 * 1024)} MB limit.", 413)
@@ -144,8 +148,53 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
             raise APIError(exc.code, exc.message, exc.http_status) from None
         finally:
             del data
+        return run_analysis(doc, type_id)
+
+    @app.post("/api/documents/text", response_model=AnalysisResponse)
+    def analyse_pasted_text(request: Request, body: PastedText) -> AnalysisResponse:
+        """Same analysis as an upload, for text pasted into the page. Kept in memory only."""
+        type_id = check_type(body.document_type)
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > settings.max_file_bytes + 64 * 1024:
+            raise APIError("file_too_large", f"The text is larger than the {settings.max_file_bytes // (1024 * 1024)} MB limit.", 413)
+        if len(body.text.encode("utf-8", "replace")) > settings.max_file_bytes:
+            raise APIError("file_too_large", f"The text is larger than the {settings.max_file_bytes // (1024 * 1024)} MB limit.", 413)
+        name = safe_filename(body.title) if body.title and body.title.strip() else "Pasted text"
+        try:
+            doc = text_document(body.text, name, settings.max_chars)
+        except DocumentError as exc:
+            raise APIError(exc.code, exc.message, exc.http_status) from None
+        return run_analysis(doc, type_id)
+
+    @app.get("/api/document-types", response_model=list[DocumentTypeOption])
+    def document_types() -> list[DocumentTypeOption]:
+        return [DocumentTypeOption(id=t.id, label=t.label) for t in doc_types.TYPES]
+
+    @app.post("/api/documents/{document_id}/reanalyse", response_model=AnalysisResponse)
+    def reanalyse(document_id: str, body: Reanalyse) -> AnalysisResponse:
+        """Analyse an already-loaded document again, as the type the user chose."""
+        rec = get_record(document_id)
+        type_id = check_type(body.document_type)
+        require_model()
+        rec.ctx.set_type(type_id)
+        with model_lock:
+            try:
+                rec.analysis = analyzer.analyse(rec.id, rec.ctx)
+            except AnalysisError as exc:
+                raise APIError(exc.code, exc.message, exc.http_status) from None
+        return rec.analysis
+
+    def check_type(type_id: str | None) -> str | None:
+        if type_id is None or type_id.strip() in {"", "auto"}:
+            return None
+        if type_id.strip() not in doc_types.BY_ID:
+            raise APIError("invalid_document_type", "Unknown document type. Choose one from the list, or Auto-detect.", 400)
+        return type_id.strip()
+
+    def run_analysis(doc, type_id: str | None) -> AnalysisResponse:  # type: ignore[no-untyped-def]
         require_model()
         ctx = DocContext(doc=doc, chunks=chunk_document(doc))
+        ctx.set_type(type_id)
         record = DocumentRecord(id=store.new_id(), ctx=ctx)
         with model_lock:
             try:

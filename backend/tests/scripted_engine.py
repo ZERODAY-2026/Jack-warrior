@@ -41,7 +41,7 @@ class ScriptedEngine:
             raise EngineError("timeout", "slow")
         excerpts = _EXCERPT.findall(user)
         if "findings" in schema["properties"]:
-            return {"findings": self._findings(excerpts)}
+            return {"findings": self._findings(excerpts), "concerns": self._concerns(excerpts)}
         if "summary" in schema["properties"]:
             return self._summary(excerpts)
         return self._answer(user, excerpts)
@@ -63,9 +63,23 @@ class ScriptedEngine:
                 explanation = "This clause is unenforceable. You should not sign this agreement. It concerns notice."
             out.append({
                 "chunk_id": cid, "category": category, "title": f"Clause in {cid}", "explanation": explanation,
+                "impact": "You would owe Rs. 99,999." if self.mode == "wrong_number" else "This sets what you must do under this clause.",
                 "classification": "explicit", "quote": quote, "priority": "high", "priority_reason": "Affects the reader.",
                 "next_step": None,
             })
+        return out
+
+    def _concerns(self, excerpts: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        out = []
+        for cid, text in excerpts:
+            for sentence in _SENT.findall(text):
+                if "considers reasonable" in sentence:
+                    quote = sentence.strip()
+                    if self.mode == "fabricate":
+                        quote = "The Landlord may keep the whole deposit for any reason."
+                    out.append({"kind": "vague", "chunk_id": cid, "quote": quote, "title": "Deposit deductions not defined",
+                                "issue": "The Landlord decides which deductions are reasonable.",
+                                "question_to_ask": "Which deductions can be made from the deposit?"})
         return out
 
     def _summary(self, excerpts: list[tuple[str, str]]) -> dict[str, Any]:
@@ -77,6 +91,8 @@ class ScriptedEngine:
             "document_type_guess": "agreement",
             "glossary": [
                 {"term": "security deposit", "explanation": "Money held by the landlord.", "quote": "security deposit of Rs. 54,000"},
+                {"term": "Rent", "explanation": "The monthly payment for the flat.", "quote": "RESIDENTIAL RENTAL AGREEMENT"},
+                {"term": "Maintenance", "explanation": "Keeping the flat in good condition.", "quote": "MAINTENANCE"},
                 {"term": "indemnity", "explanation": "Not in the document.", "quote": "indemnity clause"},
             ],
         }
@@ -84,9 +100,10 @@ class ScriptedEngine:
     def _answer(self, user: str, excerpts: list[tuple[str, str]]) -> dict[str, Any]:
         question = user.split("Question:", 1)[1].split("\n", 1)[0].lower()
         words = [w for w in re.findall(r"[a-z]+", question) if len(w) > 3]
-        for cid, text in excerpts:
-            for s in _SENT.findall(text):
-                if any(w[:5] in s.lower() for w in words):
+        scored = [(sum(w[:5] in s.lower() for w in words), -i, cid, s) for i, (cid, text) in enumerate(excerpts) for s in _SENT.findall(text)]
+        scored = [x for x in scored if x[0] > 0]
+        for _, _, cid, s in sorted(scored, reverse=True)[:1]:
+            if True:
                     quote = s.strip()
                     if self.mode == "fabricate":
                         quote = "Notice may be given orally at any time."

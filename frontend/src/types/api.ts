@@ -19,6 +19,7 @@ export interface HealthResponse {
     accepted_extensions: string[];
     max_question_chars: number;
     ocr_supported: boolean;
+    accepts_pasted_text: boolean | null;
   };
   privacy: {
     bind_host: string;
@@ -67,6 +68,8 @@ export interface Finding {
   source_passages: Passage[];
   limitations: string[];
   next_step: string | null;
+  /** Why the clause may matter in practice (v0.4). Null when the backend gave none. */
+  impact: string | null;
 }
 
 export interface NotFoundTopic {
@@ -85,11 +88,29 @@ export interface ApiWarning {
   message: string;
 }
 
+/** One entry of GET /api/document-types (v0.4). */
+export interface DocumentTypeOption {
+  id: string;
+  label: string;
+}
+
+/** The type the analysis was run as (v0.4). */
+export interface DocumentTypeInfo {
+  id: string;
+  label: string;
+  source: 'detected' | 'user';
+  detected_id: string;
+  confidence: 'high' | 'low';
+  alternatives: string[];
+}
+
 export interface AnalysisResult {
   document_id: string;
+  /** Null from backends older than v0.4. */
+  document_type: DocumentTypeInfo | null;
   document: {
     filename: string;
-    file_type: 'pdf' | 'txt';
+    file_type: 'pdf' | 'txt' | 'docx';
     size_bytes: number;
     page_count: number | null;
     char_count: number;
